@@ -129,12 +129,12 @@ buildPhase() {
 
     local binName
     for binName in "${!buildFlagsMap[@]}"; do
-        export CARGO_CRATE_NAME="$binName"
+        export CARGO_CRATE_NAME="${binName//-/_}"
         export CARGO_BIN_NAME="$binName"
         runRustc "Building binary $binName" \
             ${buildFlagsMap["$binName"]} \
             --crate-type bin \
-            --out-dir $out/bin \
+            -o "$out/bin/$binName" \
             $buildFlags \
             "${buildFlagsArray[@]}"
     done

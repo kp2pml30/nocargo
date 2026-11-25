@@ -145,6 +145,15 @@ in
       touch $out
     '';
 
+  # Binaries are named after the target, not the underscored crate name.
+  _1002-bin-name-keeps-hyphens = let
+    app = (mkRustPackageOrWorkspace { src = ./tokio-app; }).release.tokio-app;
+  in
+    pkgs.runCommand "bin-name-keeps-hyphens" { } ''
+      [[ -x ${app.bin}/bin/tokio-app ]]
+      touch $out
+    '';
+
   _1100-gen-init = mapAttrs mkGenInit {
     dependency-v1 = ./dependency-v1;
     dependency-v2 = ./dependency-v2;
