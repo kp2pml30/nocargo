@@ -4,7 +4,7 @@ let
   inherit (lib)
     readFile mapAttrs mapAttrs' makeOverridable warnIf
     isString isAttrs hasPrefix
-    filter flatten elem elemAt listToAttrs subtractLists concatStringsSep concatMap optional genAttrs
+    filter flatten elem elemAt head splitString listToAttrs subtractLists concatStringsSep concatMap optional genAttrs
     attrNames attrValues recursiveUpdate optionalAttrs;
   inherit (self.pkg-info) mkPkgInfoFromCargoToml getPkgInfoFromIndex toPkgId;
   inherit (self.resolve) resolveDepsFromLock resolveFeatures;
@@ -109,7 +109,7 @@ rec {
       # A git repository may contain several crates, keyed by name.
       gitSrcInfos = mapAttrs (url: src:
         mapAttrs' (id: info: { inherit (info) name; value = info; })
-          (collectLocalCrates lockVersion (lockedNames (source: source != null && hasPrefix "git+${url}" source))
+          (collectLocalCrates lockVersion (lockedNames (source: source != null && head (splitString "#" source) == "git+${url}"))
             (workspaceRoots src (readManifest src)))
       ) gitSrcs;
 
@@ -161,8 +161,10 @@ rec {
           base = wsDeps.${name}
             or (throw "Dependency `${name}` of ${toString root} is not in workspace dependencies");
         in
-          base // removeAttrs dep [ "workspace" "features" ] // {
+          base // removeAttrs dep [ "workspace" "features" "default-features" ] // {
             features = base.features or [] ++ dep.features or [];
+            # Members can only add default features, not remove them.
+            default-features = base.default-features or true || dep.default-features or false;
           }
       else if isAttrs dep && dep ? path then
         dep // { path = root + "/${dep.path}"; }
@@ -293,7 +295,7 @@ rec {
 
           resolvedBuildFeatures = resolveFeatures {
             inherit pkgSet rootId rootFeatures;
-            depFilter = dep: dep.targetEnabled && dep.kind == "normal" || dep.kind == "build";
+            depFilter = dep: dep.targetEnabled && (dep.kind == "normal" || dep.kind == "build");
           };
           resolvedNormalFeatures = resolveFeatures {
             inherit pkgSet rootId rootFeatures;

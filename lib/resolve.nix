@@ -2,7 +2,7 @@
 let
   inherit (builtins) readFile match fromTOML toJSON genericClosure groupBy lessThan;
   inherit (lib)
-    foldl' concatStringsSep listToAttrs filter elemAt length optional sort elem flatten unique any
+    foldl' optionals concatStringsSep listToAttrs filter elemAt length optional sort elem flatten unique any
     hasPrefix substring concatMap genAttrs nameValuePair
     attrValues mapAttrs attrNames assertMsg;
   inherit (self.semver) parseSemverReq;
@@ -146,7 +146,7 @@ in rec {
 
     depsOf = mapAttrs (id: info: filter depFilter info.dependencies) pkgSet;
     namedDeps = id: name: filter (dep: dep.name == name) depsOf.${id};
-    hasOptional = id: name: any (dep: dep.name == name && dep.optional) pkgSet.${id}.dependencies;
+    hasOptional = id: name: any (dep: dep.optional) (namedDeps id name);
 
     resolvedOf = id: dep:
       if dep.resolved == null then
@@ -162,7 +162,7 @@ in rec {
     activate = id: dep: let r = resolvedOf id dep; in
       [ (active r) ]
       ++ optional (dep.default_features && featureDefs.${r} ? default) (feat r "default")
-      ++ map (feat r) dep.features;
+      ++ concatMap (expand r) dep.features;
 
     # Facts implied by an entry of a feature definition.
     expand = id: v: let
@@ -190,8 +190,8 @@ in rec {
       else if kind == "dep" then
         concatMap (activate id) (filter (dep: dep.optional) (namedDeps id x))
       else if kind == "strong" then
-        # `d/f` also enables the implicit feature `d`, if any.
-        optional (hasOptional id x) (if featureDefs.${id} ? ${x} then feat id x else optDep id x)
+        # `d/f` enables the optional dependency `d` and the feature `d`, if any.
+        optionals (hasOptional id x) ([ (optDep id x) ] ++ optional (featureDefs.${id} ? ${x}) (feat id x))
         ++ map (dep: feat (resolvedOf id dep) y) (namedDeps id x)
       else
         map (dep: feat (resolvedOf id dep) y)
@@ -276,6 +276,28 @@ in rec {
       log-id = { features = { std = []; }; dependencies = []; };
     };
 
+    # `b` enables a feature of its own dependency via the dependency declaration.
+    pkgSet4 = {
+      a = {
+        features = {};
+        dependencies = [ (mkDep "b" "b-id" { features = [ "c/x" ]; }) ];
+      };
+      b-id = {
+        features = {};
+        dependencies = [ (mkDep "c" "c-id" { optional = true; }) ];
+      };
+      c-id = { features = { x = []; }; dependencies = []; };
+    };
+
+    # Explicit feature with the same name as an optional dependency.
+    pkgSet5 = {
+      a = {
+        features = { serde = []; json = [ "dep:serde" ]; derive = [ "serde/derive" ]; };
+        dependencies = [ (mkDep "serde" "serde-id" { optional = true; default_features = false; }) ];
+      };
+      serde-id = { features = { derive = []; }; dependencies = []; };
+    };
+
     noDeps = features: { inherit features; deps = []; };
 
   in {
@@ -312,6 +334,17 @@ in rec {
 
     weak-root = test pkgSet3 "a" [ "log?/std" ] {
       a = noDeps [ ];
+    };
+
+    dep-features-strong = test pkgSet4 "a" [ ] {
+      a = noDeps [ ];
+      b-id = { features = [ "c" ]; deps = [ "c" ]; };
+      c-id = noDeps [ "x" ];
+    };
+
+    strong-explicit-feature = test pkgSet5 "a" [ "derive" ] {
+      a = { features = [ "derive" "serde" ]; deps = [ "serde" ]; };
+      serde-id = noDeps [ "derive" ];
     };
   };
 

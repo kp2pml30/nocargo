@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-outside = { workspace = true, features = ["b"] }
+# Members cannot disable default features of a workspace dependency.
+outside = { workspace = true, features = ["b"], default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 unix-only = { path = "../../unix-only" }

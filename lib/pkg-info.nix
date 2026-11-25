@@ -163,6 +163,8 @@ rec {
 
   # Build a simplified crate into from a parsed Cargo.toml.
   mkPkgInfoFromCargoToml = { lockVersion ? 3, package, features ? {}, target ? {}, ... }@args: src: let
+    encodeQuery = if lockVersion >= 4 then encodeFormUrl else lib.id;
+
     transDeps = target: kind:
       mapAttrsToList (name: v:
         {
@@ -186,11 +188,11 @@ rec {
             else if v ? git then
               # For v1 and v2, git-branch URLs are encoded as "git+url" with no query parameters.
               if v ? branch && lockVersion >= 3 then
-                "git+${v.git}?branch=${v.branch}"
+                "git+${v.git}?branch=${encodeQuery v.branch}"
               else if v ? tag then
-                "git+${v.git}?tag=${v.tag}"
+                "git+${v.git}?tag=${encodeQuery v.tag}"
               else if v ? rev then
-                "git+${v.git}?rev=${v.rev}"
+                "git+${v.git}?rev=${encodeQuery v.rev}"
               else
                 "git+${v.git}"
             else if v ? path then
@@ -223,6 +225,13 @@ rec {
         concatLists (mapAttrsToList collectTargetDeps target);
     };
 
+  # `application/x-www-form-urlencoded` of a printable ASCII string, as used by Cargo.lock v4.
+  encodeFormUrl = let
+    special = lib.stringToCharacters " !\"#$%&'()+,/:;<=>?@[\\]^`{|}~";
+    encode = c: if c == " " then "+" else "%${lib.toUpper (lib.toHexString (lib.strings.charToInt c))}";
+  in
+    replaceStrings special (map encode special);
+
   pkg-info-from-registry-tests = { assertEq, ... }: {
     features2 = let
       info = mkPkgInfoFromRegistry (args: args) {
@@ -236,6 +245,8 @@ rec {
       };
     in
       assertEq info.features { std = []; json = [ "dep:serde" ]; };
+
+    encode-form-url = assertEq (encodeFormUrl "feat/x y%") "feat%2Fx+y%25";
   };
 
   pkg-info-from-toml-tests = { assertEq, ... }: {
@@ -294,5 +305,22 @@ rec {
         };
       in
         assertEq info expected;
+
+    git-branch-v4 = let
+      info = mkPkgInfoFromCargoToml {
+        lockVersion = 4;
+        package = { name = "foo"; version = "0.0.0"; };
+        dependencies.bar = { git = "https://example.com/bar"; branch = "feat/x"; };
+      } "<src>";
+    in
+      assertEq (builtins.head info.dependencies).source "git+https://example.com/bar?branch=feat%2Fx";
+
+    target-deps = let
+      info = mkPkgInfoFromCargoToml {
+        package = { name = "foo"; version = "0.0.0"; };
+        target."cfg(unix)".dependencies = { a = "1"; b = "1"; };
+      } "<src>";
+    in
+      assertEq (map (dep: dep.name) info.dependencies) [ "a" "b" ];
   };
 }
