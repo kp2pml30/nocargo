@@ -158,6 +158,9 @@ let
 
     dependencies = libDeps;
 
+    # `deps-closure` symlinks are copied into dependents, so they must stay absolute.
+    dontRewriteSymlinks = true;
+
   } // commonArgs // profile');
 
   binDrv = stdenv.mkDerivation ({

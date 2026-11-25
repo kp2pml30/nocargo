@@ -1,0 +1,8 @@
+[package]
+name = "outside"
+version.workspace = true
+edition = "2021"
+
+[features]
+a = []
+b = []

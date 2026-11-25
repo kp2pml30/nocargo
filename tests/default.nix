@@ -20,6 +20,7 @@ let
     "http://github.com/dtolnay/semver?branch=master" = git-semver-1-0-12; # v3
     "ssh://git@github.com/dtolnay/semver?rev=a2ce5777dcd455246e4650e36dde8e2e96fcb3fd" = git-semver-1-0-0;
     "ssh://git@github.com/dtolnay/semver" = git-semver-1-0-12;
+    "https://example.com/repo?rev=0123456789abcdef0123456789abcdef01234567" = ./git-workspace/repo;
   };
 
   extraRegistries = {
@@ -116,12 +117,14 @@ in
     dependency-v2 = ./dependency-v2;
     dependency-v3 = ./dependency-v3;
     features = ./features;
+    git-workspace = ./git-workspace/app;
     libz-dynamic = ./libz-dynamic;
     libz-static = ./libz-static;
     lto-fat = ./lto-fat;
     lto-proc-macro = ./lto-proc-macro;
     lto-thin = ./lto-thin;
     tokio-app = ./tokio-app;
+    workspace-inheritance = ./workspace-inheritance/ws;
   } // {
     workspace-inline = mkWorkspaceTest ./workspace-inline [ "bar" "baz" "foo" ];
     workspace-proc-macro-lto = mkWorkspaceTest ./workspace-proc-macro-lto [ "acro" "procm" ];

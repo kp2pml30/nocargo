@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+outside = { workspace = true, features = ["b"] }
+
+[target.'cfg(unix)'.dependencies]
+unix-only = { path = "../../unix-only" }
