@@ -103,6 +103,7 @@ rec {
         (_: null);
 
       localSrcInfos = collectLocalCrates lockVersion (lockedNames (source: source == null))
+        src
         (workspaceRoots src manifest);
 
     in mkRustPackageSet {
@@ -110,6 +111,7 @@ rec {
       gitSrcInfos = mapAttrs (url: src:
         mapAttrs' (id: info: { inherit (info) name; value = info; })
           (collectLocalCrates lockVersion (lockedNames (source: source != null && head (splitString "#" source) == "git+${url}"))
+            src
             (workspaceRoots src (readManifest src)))
       ) gitSrcs;
 
@@ -187,7 +189,7 @@ rec {
 
   # Pkg infos of local crates at `roots` and all crates in `lockedNames` reachable from them via
   # path dependencies, which may be outside the workspace.
-  collectLocalCrates = lockVersion: lockedNames: roots: let
+  collectLocalCrates = lockVersion: lockedNames: srcRoot: roots: let
     load = root: {
       key = toString root;
       inherit root;
@@ -210,7 +212,7 @@ rec {
     };
   in
     listToAttrs (map ({ root, manifest, ... }: let
-      src = crateSrc root manifest;
+      src = crateSrc srcRoot root manifest;
     in {
       name = toPkgId manifest.package;
       value = mkPkgInfoFromCargoToml (manifest // { inherit lockVersion; }) src.base // {
@@ -219,22 +221,29 @@ rec {
       };
     }) crates);
 
-  # Target paths may point outside of the crate directory, so the source must include their
-  # common ancestor. Returns it with the path of the crate inside.
-  crateSrc = root: manifest: let
+  # Crates may read files anywhere in `srcRoot` (e.g. via `include_str!`), and target paths may
+  # point outside of the crate directory. Returns the source covering both, with the crate path
+  # inside it.
+  crateSrc = srcRoot: root: manifest: let
+    segmentsOf = path: filter (s: isString s && s != "") (split "/" (toString path));
+    rootSegments = segmentsOf root;
+    srcRootSegments = segmentsOf srcRoot;
+    inSrcRoot = sublist 0 (length srcRootSegments) rootSegments == srcRootSegments;
+
     targetPaths =
       optional (manifest.lib.path or null != null) manifest.lib.path
       ++ map (bin: bin.path) (filter (bin: bin ? path) (manifest.bin or []))
       ++ optional (isString (manifest.package.build or null)) manifest.package.build;
     countUps = path: let
-      segments = filter (s: isString s && s != "" && s != ".") (split "/" path);
+      segments = filter (s: s != ".") (segmentsOf path);
       go = n: if n < length segments && elemAt segments n == ".." then go (n + 1) else n;
     in
       go 0;
-    ups = foldl' max 0 (map countUps targetPaths);
+    ups = foldl' max 0
+      (optional inSrcRoot (length rootSegments - length srcRootSegments) ++ map countUps targetPaths);
+
     ancestor = n: dir: if n == 0 then dir else ancestor (n - 1) (dirOf dir);
     base = ancestor ups root;
-    rootSegments = filter (s: isString s && s != "") (split "/" (toString root));
     subdir = concatStringsSep "/" (sublist (length rootSegments - ups) ups rootSegments);
   in
     if ups == 0 then

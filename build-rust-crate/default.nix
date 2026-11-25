@@ -174,6 +174,8 @@ let
 
     # `deps-closure` symlinks are copied into dependents, so they must stay absolute.
     dontRewriteSymlinks = true;
+    # Dependents reference `out` directly. Propagating it would add linker flags per crate.
+    propagatedBuildOutputs = [ ];
 
   } // commonArgs // profile');
 

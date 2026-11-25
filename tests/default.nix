@@ -119,6 +119,7 @@ in
     dependency-v3 = ./dependency-v3;
     features = ./features;
     git-workspace = ./git-workspace/app;
+    include-outside = ./include-outside;
     libz-dynamic = ./libz-dynamic;
     libz-static = ./libz-static;
     lto-fat = ./lto-fat;
@@ -134,12 +135,13 @@ in
     workspace-virtual = mkWorkspaceTest ./workspace-virtual [ "bar" "foo" ];
   };
 
-  # `lib` in propagated outputs makes ld-wrapper add flags per crate, overflowing the environment.
+  # `lib` dirs in propagated outputs make ld-wrapper add flags per crate, overflowing the environment.
   _1001-dev-output-has-no-lib = let
     bar = (mkRustPackageOrWorkspace { src = ./workspace-virtual; }).release.bar;
   in
     pkgs.runCommand "dev-output-has-no-lib" { } ''
       [[ -e ${bar.dev}/rust-lib && ! -e ${bar.dev}/lib ]]
+      if grep -qF ${bar.out} ${bar.dev}/nix-support/propagated-build-inputs 2>/dev/null; then exit 1; fi
       touch $out
     '';
 
