@@ -35,22 +35,6 @@ Build Rust crates with *Nix Build System*.
         Automatically supported. Since the dependency graph `Cargo.lock` currently relies on `cargo`'s generation.
   - [ ] Cross-compilation.
         FIXME: Buggy with proc-macros.
-- `noc` helper
-  - [x] `noc init`: Initial template `flake.nix` generation
-    - Dependency kinds
-      - [ ] `registry`
-      - [x] `registry-index`
-      - [x] `git`
-      - [x] `path` inside workspace
-      - [ ] `path` outside workspace
-    - Target detection
-      - [ ] Library
-            FIXME: Assume to always exist.
-      - [x] Binary
-      - [ ] Test
-      - [ ] Bench
-      - [ ] Example
-  - [ ] `Cargo.lock` generation and updating
 
 </details>
 
@@ -60,7 +44,7 @@ Build Rust crates with *Nix Build System*.
    - Install `cachix` and run `cachix use nocargo` ([see more detail about `cachix`](https://app.cachix.org/cache/nocargo)), or
    - Manually add substituter `https://nocargo.cachix.org` with public key `nocargo.cachix.org-1:W6jkp5htZBA1tUdU8XHLaD7zBrIFnor0MsLhHgrJeHk=`
 1. Enter the root directory of your rust workspace or package. Currently, you should have `Cargo.lock` already created by `cargo`.
-1. Run `nix run github:oxalica/nocargo init` to generate `flake.nix`. Or write it by hand by following [the next section](#example-flake.nix-structure).
+1. Write `flake.nix` by following [the next section](#example-flake.nix-structure).
 1. Check flake outputs with `nix flake show`. Typically, the layout would be like,
    ```
    └───packages
@@ -76,7 +60,7 @@ Build Rust crates with *Nix Build System*.
 
 ## Example `flake.nix` structure for reference 
 
-A template `flake.nix` with common setup are below. It's mostly the same as the generated one, except that the helper `noc` will scan the workspace and discover all external registries and git dependencies for you.
+A template `flake.nix` with common setup is below. External registries and git dependencies must be listed by hand.
 
 ```nix
 {

@@ -29,11 +29,6 @@
             });
         };
       in rec {
-        apps.default = {
-          type = "app";
-          program = "${packages.noc}/bin/noc";
-        };
-
         # Is there a better place? `naersk` places builders under `lib.${system}`.
         lib = rec {
           mkIndex = nocargo-lib.pkg-info.mkIndex pkgs.fetchurl;
@@ -46,12 +41,8 @@
           };
         };
 
-        packages = rec {
-          default = noc;
+        packages = {
           toml2json = pkgs.callPackage ./toml2json { };
-          noc = (lib.mkRustPackageOrWorkspace {
-            src = ./noc;
-          }).release.nocargo.bin;
 
           cache = pkgs.callPackage ./cache {
             inherit (lib) mkRustPackageOrWorkspace;

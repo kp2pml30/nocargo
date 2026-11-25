@@ -1,8 +1,7 @@
 { pkgs, self, inputs, defaultRegistries }:
 let
-  inherit (pkgs.lib) mapAttrs attrNames attrValues assertMsg head mapAttrsToList;
+  inherit (pkgs.lib) mapAttrs attrNames attrValues assertMsg head;
   inherit (self.lib.${pkgs.system}) mkRustPackageOrWorkspace;
-  inherit (self.packages.${pkgs.system}) noc;
 
   git-semver-1-0-0 = builtins.fetchTarball {
     url = "https://github.com/dtolnay/semver/archive/1.0.0/master.tar.gz";
@@ -59,52 +58,6 @@ let
       got:    ${toString gotMembers}
     '';
     ws;
-
-  # Recursive Nix setup.
-  # https://github.com/NixOS/nixpkgs/blob/e966ab3965a656efdd40b6ae0d8cec6183972edc/pkgs/top-level/make-tarball.nix#L45-L48
-  mkGenInit = name: path:
-    pkgs.runCommand "gen-${name}" {
-      nativeBuildInputs = [ noc pkgs.nix ];
-      checkFlags =
-        mapAttrsToList (from: to: "--override-input ${from} ${to}") {
-          inherit (inputs) nixpkgs flake-utils;
-          nocargo = self;
-          "nocargo/registry-crates-io" = inputs.registry-crates-io;
-          registry-1 = inputs.registry-crates-io;
-          git-1 = git-semver-1-0-0;
-          git-2 = git-semver-1-0-0;
-          git-3 = git-semver-1-0-0;
-          git-4 = git-semver-1-0-0;
-        };
-    } ''
-      cp -r ${path} src
-      chmod -R u+w src
-      cd src
-
-      echo "generating flake.nix"
-      noc init
-      cat flake.nix
-      install -D flake.nix $out/flake.nix
-
-      echo "checking with 'nix flake check'"
-      export NIX_STATE_DIR=$TMPDIR/nix/var
-      export NIX_PATH=
-      export HOME=$TMPDIR
-      nix-store --init
-      nixFlags=(
-        --offline
-        --option build-users-group ""
-        --option experimental-features "ca-derivations nix-command flakes"
-        --store $TMPDIR/nix/store
-      )
-
-      nix flake check \
-        --no-build \
-        --show-trace \
-        $checkFlags \
-        "''${nixFlags[@]}"
-    '';
-
 in
 {
   _1000-hello-worlds = mapAttrs (name: path: mkHelloWorldTest path) {
@@ -153,14 +106,4 @@ in
       [[ -x ${app.bin}/bin/tokio-app ]]
       touch $out
     '';
-
-  _1100-gen-init = mapAttrs mkGenInit {
-    dependency-v1 = ./dependency-v1;
-    dependency-v2 = ./dependency-v2;
-    dependency-v3 = ./dependency-v3;
-    features = ./features;
-
-    workspace-virtual = ./workspace-virtual;
-    workspace-inline = ./workspace-inline;
-  };
 }
