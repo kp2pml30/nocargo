@@ -109,6 +109,7 @@ in
 {
   _1000-hello-worlds = mapAttrs (name: path: mkHelloWorldTest path) {
     build-deps = ./build-deps;
+    build-script-env = ./build-script-env;
     build-feature-env-vars = ./build-feature-env-vars;
     cap-lints = ./cap-lints;
     crate-names = ./crate-names;

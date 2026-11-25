@@ -279,8 +279,6 @@ rec {
 
       buildRustCrate' = info: args:
         let
-          # TODO: Proc macro crates should behave differently in dependency resolution.
-          # But this override is applied just before the `buildRustCrate` call.
           args' = args // (info.__override or lib.id) args;
           args'' = args' // (buildCrateOverrides.${toPkgId info} or lib.id) args';
         in
@@ -304,7 +302,7 @@ rec {
 
           pkgsBuild = mapAttrs (id: { features, deps }: let info = pkgSet.${id}; in
             buildRustCrate' info {
-              inherit (info) version src procMacro;
+              inherit (info) version src;
               manifest = info.manifest or null;
               inherit features profile rustc;
               pname = info.name;
@@ -318,7 +316,7 @@ rec {
 
           pkgs = mapAttrs (id: { features, deps }: let info = pkgSet.${id}; in
             buildRustCrate' info {
-              inherit (info) version src links procMacro;
+              inherit (info) version src links;
               manifest = info.manifest or null;
               inherit features profile rustc;
               pname = info.name;

@@ -1,4 +1,4 @@
-{ lib, nocargo-lib, stdenv, buildPackages, rust, toml2json, jq }:
+{ lib, nocargo-lib, stdenv, buildPackages, toml2json, jq }:
 { pname
 , version
 , src
@@ -14,7 +14,6 @@
 , capLints ? null
 , buildFlags ? []
 , buildScriptBuildFlags ? []
-, procMacro ? false
 # Normalized `package`, `lib` and `bin` tables, replacing the ones in `Cargo.toml`.
 , manifest ? null
 
@@ -38,7 +37,6 @@ let
   # TODO: Pass target binary paths instead of drv here?
   mkDeps = map ({ rename, drv, ... }: lib.concatStringsSep ":" [
     (toString rename)
-    (toString drv.procMacro)
     drv.out
     drv.dev
   ]);
@@ -62,7 +60,7 @@ let
     # TODO: `-Cstrip` is not handled since stdenv will always strip them.
     ++ lib.optional (p ? debug-assertions) "-Cdebug-assertions=${convertBool "no" "yes" p.debug-assertions}"
     ++ lib.optional (p ? overflow-checks) "-Coverflow-checks=${convertBool "no" "yes" p.debug-assertions}"
-    ++ lib.optional (!procMacro && p.lto or false != false) "-Clto=${if p.lto == true then "fat" else p.lto}"
+    ++ lib.optional (p.lto or false != false) "-Clto=${if p.lto == true then "fat" else p.lto}"
     ++ lib.optional (p.panic or "unwind" != "unwind") "-Cpanic=${p.panic}"
     # `incremental` is not useful since Nix builds in a sandbox.
     ++ lib.optional (p ? codegen-units) "-Ccodegen-units=${toString p.codegen-units}"
@@ -82,7 +80,10 @@ let
       ++ buildScriptBuildFlags;
 
     # Build script environments.
-    PROFILE = p.name or null;
+    # Cargo only distinguishes release-based and dev-based profiles here.
+    PROFILE =
+      if lib.any (name: lib.elem name [ "release" "bench" ]) [ (p.name or null) (p.inherits or null) ]
+      then "release" else "debug";
     OPT_LEVEL = p.opt-level or 0;
     DEBUG = p.debug or 0 != 0;
   };
@@ -115,7 +116,6 @@ let
     "capLints"
     "buildFlags"
     "buildScriptBuildFlags"
-    "procMacro"
     "manifest"
     "nativeBuildInputs"
     "propagatedBuildInputs"
@@ -137,8 +137,8 @@ let
 
     linksDependencies = map (dep: dep.drv.buildDrv) linksDependencies;
 
-    HOST = rust.toRustTarget stdenv.buildPlatform;
-    TARGET = rust.toRustTarget stdenv.hostPlatform;
+    HOST = stdenv.buildPlatform.rust.rustcTarget;
+    TARGET = stdenv.hostPlatform.rust.rustcTarget;
 
     # This drv links for `build_script_build`.
     # So include transitively propagated upstream `-sys` crates' ld dependencies.
@@ -147,14 +147,17 @@ let
     # Build script may produce object files and static libraries which should not be modified.
     dontFixup = true;
 
-  } // commonArgs // cargoCfgs // buildProfile');
+  } // commonArgs // cargoCfgs // buildProfile' // {
+    # These describe the profile of the crate, not of its build script.
+    inherit (profile') PROFILE OPT_LEVEL DEBUG;
+  });
 
   libDrv = stdenv.mkDerivation ({
     name = "rust_${pname}-${version}";
 
     builder = ./builder-lib.sh;
     outputs = [ "out" "dev" ];
-    inherit builderCommon buildDrv features rustcMeta procMacro;
+    inherit builderCommon buildDrv features rustcMeta;
 
     # Transitively propagate upstream `-sys` crates' ld dependencies.
     # Since `rlib` doesn't link.

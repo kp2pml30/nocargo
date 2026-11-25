@@ -71,8 +71,6 @@ rec {
       name = parsed.vers;
       value = mkPkgInfoFromRegistry mkSrc parsed
         // optionalAttrs (override != null) {
-          # Proc macro crates behave differently in dependency resolution.
-          procMacro = (override { inherit (parsed) version; features = { }; }).procMacro or false;
           __override = override;
         };
     };
@@ -87,7 +85,6 @@ rec {
   #   sha256 = "123456....";  # Hash of the `src` tarball. (null or string)
   #   yanked = false;         # Whether it's yanked.
   #   links = "z";            # The native library to link. (null or string)
-  #   procMacro = false;      # Whether this is a proc-macro library. See comments below.
   #   features = {            # Features provided.
   #     default = [ "std" ];
   #     std = [];
@@ -120,9 +117,6 @@ rec {
       version = vers;
       sha256 = cksum;
       dependencies = map sanitizeDep deps;
-      # N.B. Proc macro indicator is not in the registry: https://github.com/rust-lang/cargo/issues/9605
-      # This would be overrided in `mkPkgInfoSet`.
-      procMacro = false;
       src = mkSrc {
         inherit name;
         version = vers;
@@ -219,7 +213,6 @@ rec {
       inherit (package) name version;
       inherit src features;
       links = package.links or null;
-      procMacro = args.lib.proc-macro or false;
       dependencies =
         collectTargetDeps null args ++
         concatLists (mapAttrsToList collectTargetDeps target);
@@ -260,7 +253,6 @@ rec {
         features = { };
         src = "<src>";
         links = null;
-        procMacro = false;
         dependencies = [
           {
             name = "tokio";
@@ -288,7 +280,6 @@ rec {
           features = { };
           src = "<src>";
           links = null;
-          procMacro = false;
           dependencies = [
             {
               name = "semver";

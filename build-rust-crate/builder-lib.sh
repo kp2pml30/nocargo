@@ -31,15 +31,18 @@ configurePhase() {
     fi
 
     mapfile -t crateTypes < <(jq --raw-output '.lib."crate-type" // ["lib"] | .[]' "$cargoTomlJson")
-    cargoTomlIsProcMacro="$(jq --raw-output 'if .lib."proc-macro" then "1" else "" end' "$cargoTomlJson")"
-    if [[ "$cargoTomlIsProcMacro" != "$procMacro" ]]; then
-        echo "Cargo.toml says proc-macro = ${cargoTomlIsProcMacro:-0} but it is built with procMacro = ${procMacro:-0}"
-        exit 1
-    fi
+    procMacro="$(jq --raw-output 'if .lib."proc-macro" then "1" else "" end' "$cargoTomlJson")"
     if [[ -n "$procMacro" ]]; then
         # Override crate type.
         crateTypes=("proc-macro")
         buildFlagsArray+=(--extern=proc_macro)
+        # Proc macros are loaded by rustc and cannot be LTO-ed.
+        local flag
+        local -a keptFlags=()
+        for flag in $buildFlags; do
+            [[ "$flag" == -Clto=* ]] || keptFlags+=("$flag")
+        done
+        buildFlags="${keptFlags[*]}"
     fi
 
     needLinkDeps=
@@ -110,6 +113,10 @@ installPhase() {
     # May be empty.
     mv -t $dev/lib $out/lib/*.rmeta 2>/dev/null || true
     ln -sft $dev/rust-support/deps-closure $out/lib/* $dev/lib/* 2>/dev/null || true
+    if [[ -n "$procMacro" ]]; then
+        mkdir -p $out/rust-support
+        touch $out/rust-support/proc-macro
+    fi
 
     runHook postInstall
 }
