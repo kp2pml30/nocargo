@@ -109,12 +109,14 @@ rec {
   mkPkgInfoFromRegistry =
     mkSrc:
     # https://github.com/rust-lang/cargo/blob/2f3df16921deb34a92700f4d5a7ecfb424739558/src/cargo/sources/registry/mod.rs#L259
-    { name, vers, deps, features, cksum, yanked ? false, links ? null, v ? 1, ... }:
-    if v != 1 then
+    { name, vers, deps, features, cksum, yanked ? false, links ? null, v ? 1, features2 ? {}, ... }:
+    if v > 2 then
       throw "${name} ${vers}: Registry layout version ${toString v} is too new to understand"
     else
     {
-      inherit name features yanked links;
+      inherit name yanked links;
+      # V2 moves features using `dep:` or `?` syntax into `features2`.
+      features = features // features2;
       version = vers;
       sha256 = cksum;
       dependencies = map sanitizeDep deps;

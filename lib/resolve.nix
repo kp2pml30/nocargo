@@ -23,8 +23,7 @@ in rec {
   #   };
   # }
   #
-  # Currently (rust 1.63.0), there are 3 versions of the lock file.
-  # We supports V1, V2 and V3.
+  # We support V3 and V4. V4 only differs in percent-encoding of git query parameters.
   # See:
   # https://github.com/rust-lang/cargo/blob/rust-1.63.0/src/cargo/core/resolver/resolve.rs#L56
   # https://github.com/rust-lang/cargo/blob/rust-1.63.0/src/cargo/core/resolver/encode.rs
@@ -110,7 +109,7 @@ in rec {
       };
 
   in
-    assert assertMsg (lock.version or 3 == 3) "Unsupported version of Cargo.lock: ${toString lock.version}";
+    assert assertMsg (elem (lock.version or 3) [ 3 4 ]) "Unsupported version of Cargo.lock: ${toString lock.version}";
     resolved;
 
   # Calculate the closure of each feature, with `dep:pkg` and `pkg?/feat` syntax desugared.
