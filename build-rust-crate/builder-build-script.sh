@@ -99,12 +99,30 @@ installPhase() {
     runHook preInstall
 
     # https://doc.rust-lang.org/1.61.0/cargo/reference/build-scripts.html#outputs-of-the-build-script
-    local line rhs
+    local line rhs newSyntax
     while read -r line; do
+        # `cargo::` directives are the same as `cargo:` ones, except that metadata is explicit.
+        newSyntax=
+        if [[ "$line" == cargo::* ]]; then
+            newSyntax=1
+            case "$line" in
+                cargo::metadata=*)
+                    line="cargo:${line#cargo::metadata=}"
+                    newSyntax=
+                    ;;
+                cargo::error=*)
+                    echo "Build script error: ${line#cargo::error=}"
+                    exit 1
+                    ;;
+                *)
+                    line="cargo:${line#cargo::}"
+                    ;;
+            esac
+        fi
         rhs="${line#*=}"
         case "$line" in
-            cargo:rerun-if-changed=*|cargo:rerun-if-env-changed=*)
-                # Ignored due to the sandbox.
+            cargo:rerun-if-changed=*|cargo:rerun-if-env-changed=*|cargo:rustc-check-cfg=*)
+                # Ignored due to the sandbox, or only affecting lints.
                 ;;
             cargo:rustc-link-arg=*)
                 echo "-Clink-arg=$rhs" >>"$out/rust-support/rustc-link-args"
@@ -174,7 +192,10 @@ installPhase() {
                 printf "\033[0;1;33mWarning\033[0m: %s\n" "$rhs"
                 ;;
             cargo:*=*)
-                if [[ -n "${links:-}" ]]; then
+                if [[ -n "$newSyntax" ]]; then
+                    echo "Unknown or wrong output line: cargo::${line#cargo:}"
+                    exit 1
+                elif [[ -n "${links:-}" ]]; then
                     rhs="${line#*:}"
                     local k="DEP_${links}_${rhs%%=*}" v="${rhs#*=}"
                     k="${k^^}"

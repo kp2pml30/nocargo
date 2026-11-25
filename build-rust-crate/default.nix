@@ -16,6 +16,8 @@
 , buildScriptBuildFlags ? []
 # Normalized `package`, `lib` and `bin` tables, replacing the ones in `Cargo.toml`.
 , manifest ? null
+# Path of the crate inside `src`, if `src` is an ancestor of it.
+, crateSubdir ? null
 
 , nativeBuildInputs ? []
 , propagatedBuildInputs ? []
@@ -94,6 +96,10 @@ let
   commonArgs = {
     inherit pname version src;
 
+    postUnpack = lib.optionalString (crateSubdir != null) ''
+      sourceRoot="$sourceRoot/${crateSubdir}"
+    '';
+
     nativeBuildInputs = [ toml2json jq ] ++ nativeBuildInputs;
 
     sharedLibraryExt = stdenv.hostPlatform.extensions.sharedLibrary;
@@ -117,6 +123,7 @@ let
     "buildFlags"
     "buildScriptBuildFlags"
     "manifest"
+    "crateSubdir"
     "nativeBuildInputs"
     "propagatedBuildInputs"
   ];

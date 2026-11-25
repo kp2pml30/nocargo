@@ -122,8 +122,10 @@ in
     libz-dynamic = ./libz-dynamic;
     libz-static = ./libz-static;
     lto-fat = ./lto-fat;
+    lto-mixed-crate-types = ./lto-mixed-crate-types;
     lto-proc-macro = ./lto-proc-macro;
     lto-thin = ./lto-thin;
+    outside-lib-path = ./outside-lib-path/crate;
     tokio-app = ./tokio-app;
     workspace-inheritance = ./workspace-inheritance/ws;
   } // {

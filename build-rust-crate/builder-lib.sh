@@ -10,6 +10,10 @@ configurePhase() {
     convertCargoToml
 
     libSrc="$(jq --raw-output '.lib.path // ""' "$cargoTomlJson")"
+    if [[ -n "$libSrc" && ! -e "$libSrc" ]]; then
+        echo "Library path '$libSrc' does not exist"
+        exit 1
+    fi
     if [[ -z "$libSrc" && -e src/lib.rs ]]; then
         libSrc=src/lib.rs
     fi
@@ -36,22 +40,22 @@ configurePhase() {
         # Override crate type.
         crateTypes=("proc-macro")
         buildFlagsArray+=(--extern=proc_macro)
-        # Proc macros are loaded by rustc and cannot be LTO-ed.
-        local flag
-        local -a keptFlags=()
-        for flag in $buildFlags; do
-            [[ "$flag" == -Clto=* ]] || keptFlags+=("$flag")
-        done
-        buildFlags="${keptFlags[*]}"
     fi
 
     needLinkDeps=
     buildCdylib=
+    # Like Cargo, only apply LTO if all outputs support it.
+    ltoAllowed=1
     for crateType in "${crateTypes[@]}"; do
         case "$crateType" in
             lib|rlib)
+                ltoAllowed=
                 ;;
-            dylib|staticlib|proc-macro|bin)
+            dylib|proc-macro)
+                needLinkDeps=1
+                ltoAllowed=
+                ;;
+            staticlib|bin)
                 needLinkDeps=1
                 ;;
             cdylib)
@@ -63,6 +67,14 @@ configurePhase() {
                 ;;
         esac
     done
+    if [[ -z "$ltoAllowed" ]]; then
+        local flag
+        local -a keptFlags=()
+        for flag in $buildFlags; do
+            [[ "$flag" == -Clto=* ]] || keptFlags+=("$flag")
+        done
+        buildFlags="${keptFlags[*]}"
+    fi
     if [[ -n "$needLinkDeps" ]]; then
         addExternFlags buildFlagsArray link $dependencies
     else

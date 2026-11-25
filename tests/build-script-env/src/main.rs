@@ -1,3 +1,4 @@
+#[cfg(new_syntax)]
 fn main() {
-    println!("Hello, world!");
+    println!("{}", env!("GREETING"));
 }

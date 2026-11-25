@@ -1,10 +1,10 @@
 { lib, self }:
 let
-  inherit (builtins) fromTOML toJSON match tryEval split pathExists genericClosure storeDir intersectAttrs;
+  inherit (builtins) fromTOML toJSON match tryEval split pathExists genericClosure storeDir intersectAttrs length;
   inherit (lib)
     readFile mapAttrs mapAttrs' makeOverridable warnIf
     isString isAttrs hasPrefix
-    filter flatten elem elemAt head splitString listToAttrs subtractLists concatStringsSep concatMap optional genAttrs
+    filter flatten elem elemAt head splitString listToAttrs subtractLists concatStringsSep concatMap optional genAttrs sublist foldl' max
     attrNames attrValues recursiveUpdate optionalAttrs;
   inherit (self.pkg-info) mkPkgInfoFromCargoToml getPkgInfoFromIndex toPkgId;
   inherit (self.resolve) resolveDepsFromLock resolveFeatures;
@@ -209,12 +209,40 @@ rec {
       operator = { manifest, ... }: map load (pathDeps manifest);
     };
   in
-    listToAttrs (map ({ root, manifest, ... }: {
+    listToAttrs (map ({ root, manifest, ... }: let
+      src = crateSrc root manifest;
+    in {
       name = toPkgId manifest.package;
-      value = mkPkgInfoFromCargoToml (manifest // { inherit lockVersion; }) root // {
+      value = mkPkgInfoFromCargoToml (manifest // { inherit lockVersion; }) src.base // {
+        inherit (src) crateSubdir;
         manifest = intersectAttrs (genAttrs [ "package" "lib" "bin" ] (_: null)) manifest;
       };
     }) crates);
+
+  # Target paths may point outside of the crate directory, so the source must include their
+  # common ancestor. Returns it with the path of the crate inside.
+  crateSrc = root: manifest: let
+    targetPaths =
+      optional (manifest.lib.path or null != null) manifest.lib.path
+      ++ map (bin: bin.path) (filter (bin: bin ? path) (manifest.bin or []))
+      ++ optional (isString (manifest.package.build or null)) manifest.package.build;
+    countUps = path: let
+      segments = filter (s: isString s && s != "" && s != ".") (split "/" path);
+      go = n: if n < length segments && elemAt segments n == ".." then go (n + 1) else n;
+    in
+      go 0;
+    ups = foldl' max 0 (map countUps targetPaths);
+    ancestor = n: dir: if n == 0 then dir else ancestor (n - 1) (dirOf dir);
+    base = ancestor ups root;
+    rootSegments = filter (s: isString s && s != "") (split "/" (toString root));
+    subdir = concatStringsSep "/" (sublist (length rootSegments - ups) ups rootSegments);
+  in
+    if ups == 0 then
+      { base = root; crateSubdir = null; }
+    else if toString base == storeDir || toString base == "/" then
+      throw "Target paths of ${toString root} point outside of its source"
+    else
+      { inherit base; crateSubdir = subdir; };
 
   # -> { <profile-name> = { <member-pkg-name> = <drv>; }; }
   mkRustPackageSet =
@@ -304,6 +332,7 @@ rec {
             buildRustCrate' info {
               inherit (info) version src;
               manifest = info.manifest or null;
+              crateSubdir = info.crateSubdir or null;
               inherit features profile rustc;
               pname = info.name;
               capLints = if localSrcInfos ? ${id} then null else "allow";
@@ -318,6 +347,7 @@ rec {
             buildRustCrate' info {
               inherit (info) version src links;
               manifest = info.manifest or null;
+              crateSubdir = info.crateSubdir or null;
               inherit features profile rustc;
               pname = info.name;
               capLints = if localSrcInfos ? ${id} then null else "allow";
