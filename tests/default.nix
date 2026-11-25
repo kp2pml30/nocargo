@@ -132,6 +132,15 @@ in
     workspace-virtual = mkWorkspaceTest ./workspace-virtual [ "bar" "foo" ];
   };
 
+  # `lib` in propagated outputs makes ld-wrapper add flags per crate, overflowing the environment.
+  _1001-dev-output-has-no-lib = let
+    bar = (mkRustPackageOrWorkspace { src = ./workspace-virtual; }).release.bar;
+  in
+    pkgs.runCommand "dev-output-has-no-lib" { } ''
+      [[ -e ${bar.dev}/rust-lib && ! -e ${bar.dev}/lib ]]
+      touch $out
+    '';
+
   _1100-gen-init = mapAttrs mkGenInit {
     dependency-v1 = ./dependency-v1;
     dependency-v2 = ./dependency-v2;

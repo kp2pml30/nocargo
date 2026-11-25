@@ -22,7 +22,7 @@ addExternFlags() {
         if [[ -e "$depOut/rust-support/proc-macro" ]]; then
             paths=("$depOut"/lib/*"$sharedLibraryExt")
         elif [[ "$kind" == meta ]]; then
-            paths=("$depDev"/lib/*.rmeta)
+            paths=("$depDev"/rust-lib/*.rmeta)
         else
             # FIXME: Currently we only link rlib.
             paths=("$depOut"/lib/*.rlib)

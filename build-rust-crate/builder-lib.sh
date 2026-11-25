@@ -108,11 +108,11 @@ buildPhase() {
 installPhase() {
     runHook preInstall
 
-    mkdir -p $out $bin $dev/lib $dev/rust-support/deps-closure
+    mkdir -p $out $bin $dev/rust-lib $dev/rust-support/deps-closure
 
     # May be empty.
-    mv -t $dev/lib $out/lib/*.rmeta 2>/dev/null || true
-    ln -sft $dev/rust-support/deps-closure $out/lib/* $dev/lib/* 2>/dev/null || true
+    mv -t $dev/rust-lib $out/lib/*.rmeta 2>/dev/null || true
+    ln -sft $dev/rust-support/deps-closure $out/lib/* $dev/rust-lib/* 2>/dev/null || true
     if [[ -n "$procMacro" ]]; then
         mkdir -p $out/rust-support
         touch $out/rust-support/proc-macro

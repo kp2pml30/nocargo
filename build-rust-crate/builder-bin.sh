@@ -103,7 +103,7 @@ configurePhase() {
     fi
 
     # Implicitly link library of current crate, if exists.
-    if [[ -e "$libDevDrv"/lib ]]; then
+    if [[ -e "$libDevDrv"/rust-lib ]]; then
         addExternFlags buildFlagsArray link ":$libOutDrv:$libDevDrv"
     fi
 
