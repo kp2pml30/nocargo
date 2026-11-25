@@ -1,10 +1,10 @@
 { lib, self }:
 let
-  inherit (builtins) readFile match fromTOML toJSON;
+  inherit (builtins) readFile match fromTOML toJSON genericClosure groupBy lessThan;
   inherit (lib)
-    foldl' concatStringsSep listToAttrs filter elemAt length optional sort elem flatten
-    hasPrefix substring
-    attrValues mapAttrs attrNames filterAttrs composeManyExtensions assertMsg;
+    foldl' concatStringsSep listToAttrs filter elemAt length optional sort elem flatten unique any
+    hasPrefix substring concatMap genAttrs nameValuePair
+    attrValues mapAttrs attrNames assertMsg;
   inherit (self.semver) parseSemverReq;
   inherit (self.pkg-info) mkPkgInfoFromCargoToml toPkgId sanitizeDep;
 in rec {
@@ -112,70 +112,14 @@ in rec {
     assert assertMsg (elem (lock.version or 3) [ 3 4 ]) "Unsupported version of Cargo.lock: ${toString lock.version}";
     resolved;
 
-  # Calculate the closure of each feature, with `dep:pkg` and `pkg?/feat` syntax desugared.
-  # [String] -> { [String] } -> { [String | { dep: String, feat?: String }] }
-  preprocessFeatures = optionalDeps: defs: let
-    allRefs = flatten (attrValues defs);
-    defs' =
-      listToAttrs
-        (map (dep: { name = dep; value = [ "dep:${dep}" ]; })
-          (filter (dep: !elem "dep:${dep}" allRefs)
-            optionalDeps))
-      // defs;
-    go = prev: feat:
-      let
-        m = match "([a-zA-Z0-9]+)(\\?)?/([a-zA-Z0-9]+)" feat;
-        depName = elemAt m 0;
-        isWeak = elemAt m 1 != null;
-        depFeat = elemAt m 2;
-      in if elem feat prev then
-        prev
-      else if defs' ? ${feat} then
-        foldl' go ([ feat ] ++ prev) defs'.${feat}
-      else if hasPrefix "dep:" feat then
-        [ { dep = substring 4 (-1) feat; } ] ++ prev
-      else if m == null then
-        [ feat ] ++ prev
-      else if isWeak then
-        [ { dep = depName; feat = depFeat; } ] ++ prev
-      else
-        [ { dep = depName; } { dep = depName; feat = depFeat; } ] ++ prev;
-    fixed = mapAttrs (feat: _: go [ ] feat) defs';
-  in
-    fixed;
-
-  # Enable `features` in `prev` and do recursive update according to `defs`.
-  # Optional dependencies must be included in `defs`.
-  enableFeatures = pkgId: defs: prev: features:
-    foldl' (prev: feat: let
-      m = match "(.*)/.*" feat;
-      mDep = elemAt m 0;
-      nexts =
-        if m == null then
-          # Must be defined.
-          defs.${feat} or (throw ''
-            Feature '${feat}' is invalid for ${pkgId}.
-            Possible features: ${concatStringsSep "," (attrNames defs)}
-          '')
-        else
-          # Dependent features implies optional dependency to be enabled.
-          # But non-optional dependency doesn't have coresponding feature flag.
-          optional (defs ? ${mDep}) mDep;
-    in
-      if prev.${feat} or false then
-        prev
-      else
-        enableFeatures pkgId defs (prev // { ${feat} = true; }) nexts
-    ) prev features;
-
-  # Resolve all features.
-  # Note that dependent features like `foo/bar` are only available during resolution,
-  # and will be removed in result set.
+  # Resolve features of all packages reachable from `rootId`, following Cargo semantics of
+  # `dep:d`, `d/f`, `d?/f` and implicit features of optional dependencies.
   #
-  # Returns:
+  # Returns, for reachable packages only:
   # {
-  #   "libc 0.1.0 (https://...)" = [ "default" "foo" "bar" ];
+  #   "libc 0.1.0 (https://...)" = { features = [ "default" "std" ]; deps = [ "serde" ]; };
   # }
+  # where `deps` are names of enabled optional dependencies.
   resolveFeatures = {
   # Follows the layout of the output of `resolveDepsFromLock`.
     pkgSet
@@ -188,159 +132,109 @@ in rec {
   , rootFeatures
   }: let
 
-    featureDefs = mapAttrs (id: { features, dependencies, ... }:
-      features //
-      listToAttrs
-        (map (dep: { name = dep.name; value = []; })
-          # We should collect all optional dependencies for feature def, even though they are not selected.
-          # This happens on `rand@0.8.3`, whose `default` feature enables `rand_hc`, which is only available
-          # for `cfg(target_os = "emscripten")`. This feature should be still enable, though optional dependency
-          # is not.
-          (filter (dep: dep.optional) dependencies))
+    # Implicit features are collected from all optional dependencies, even filtered out ones.
+    # This happens on `rand@0.8.3`, whose `default` feature enables `rand_hc`, which is only available
+    # for `cfg(target_os = "emscripten")`.
+    featureDefs = mapAttrs (id: { features, dependencies, ... }: let
+      allRefs = flatten (attrValues features);
+      implicit = filter
+        (name: !elem "dep:${name}" allRefs && !(features ? ${name}))
+        (unique (map (dep: dep.name) (filter (dep: dep.optional) dependencies)));
+    in
+      genAttrs implicit (name: [ "dep:${name}" ]) // features
     ) pkgSet;
 
-    # initialFeatures = mapAttrs (id: defs: mapAttrs (k: v: false) defs) featureDefs;
-    initialFeatures = mapAttrs (id: info: {}) pkgSet;
+    depsOf = mapAttrs (id: info: filter depFilter info.dependencies) pkgSet;
+    namedDeps = id: name: filter (dep: dep.name == name) depsOf.${id};
+    hasOptional = id: name: any (dep: dep.name == name && dep.optional) pkgSet.${id}.dependencies;
 
-    # Overlay of spreading <id>'s nested features into dependencies and enable optional dependencies.
-    updateDepsOverlay = id: final: prev: let
-      info = pkgSet.${id};
-      finalFeatures = final.${id} or {};
-      updateDep = { name, optional, resolved, default_features, features, ... }: final: prev: let
-        depFeatures =
-          lib.optional (default_features && featureDefs.${resolved} ? default) "default" ++
-          features ++
-          filter (feat: feat != null)
-            (map (feat: let m = match "(.*)/(.*)" feat; in
-              if m != null && elemAt m 0 == name then
-                elemAt m 1
-              else
-                null
-              ) (attrNames finalFeatures));
-      in
-        {
-          ${resolved} =
-            # This condition must be evaluated under `${resolved} =`,
-            # or we'll enter an infinite recursion.
-            if optional -> finalFeatures.${name} or false then
-              enableFeatures
-                resolved
-                featureDefs.${resolved}
-                prev.${resolved}
-                depFeatures
-            else
-              prev.${resolved};
-        };
+    resolvedOf = id: dep:
+      if dep.resolved == null then
+        throw "When resolving ${id}, dependency `${dep.name}` is enabled but missing in Cargo.lock"
+      else
+        dep.resolved;
+
+    mkFact = kind: id: x: y: { key = concatStringsSep "\n" [ kind id x y ]; inherit kind id x y; };
+    active = id: mkFact "active" id "" "";
+    feat = id: f: mkFact "feat" id f "";
+    optDep = id: name: mkFact "dep" id name "";
+
+    activate = id: dep: let r = resolvedOf id dep; in
+      [ (active r) ]
+      ++ optional (dep.default_features && featureDefs.${r} ? default) (feat r "default")
+      ++ map (feat r) dep.features;
+
+    # Facts implied by an entry of a feature definition.
+    expand = id: v: let
+      m = match "([^/?]+)(\\?)?/(.+)" v;
+      name = elemAt m 0;
     in
-      composeManyExtensions
-        (map updateDep
-          (filter depFilter info.dependencies))
-        final
-        prev;
+      if hasPrefix "dep:" v then
+        [ (optDep id (substring 4 (-1) v)) ]
+      else if m == null then
+        [ (feat id v) ]
+      else
+        [ (mkFact (if elemAt m 1 != null then "weak" else "strong") id name (elemAt m 2)) ];
 
-    rootOverlay = final: prev: {
-      ${rootId} = enableFeatures
-        rootId
-        featureDefs.${rootId}
-        initialFeatures.${rootId}
-        rootFeatures;
-    };
+    # `enabledDeps` is the set of optional dependencies enabled in the previous round,
+    # needed by weak features which are not monotonic within a single closure.
+    step = enabledDeps: { kind, id, x, y, ... }:
+      if kind == "active" then
+        concatMap (activate id) (filter (dep: !dep.optional) depsOf.${id})
+      else if kind == "feat" then
+        [ (active id) ]
+        ++ concatMap (expand id) (featureDefs.${id}.${x} or (throw ''
+          Feature '${x}' is invalid for ${id}.
+          Possible features: ${concatStringsSep "," (attrNames featureDefs.${id})}
+        ''))
+      else if kind == "dep" then
+        concatMap (activate id) (filter (dep: dep.optional) (namedDeps id x))
+      else if kind == "strong" then
+        # `d/f` also enables the implicit feature `d`, if any.
+        optional (hasOptional id x) (if featureDefs.${id} ? ${x} then feat id x else optDep id x)
+        ++ map (dep: feat (resolvedOf id dep) y) (namedDeps id x)
+      else
+        map (dep: feat (resolvedOf id dep) y)
+          (filter (dep: !dep.optional || enabledDeps ? ${"${id}\n${x}"}) (namedDeps id x));
 
-    final =
-      composeManyExtensions
-      (map updateDepsOverlay (attrNames pkgSet) ++ [ rootOverlay ])
-      final
-      initialFeatures;
+    roots = [ (active rootId) ] ++ concatMap (expand rootId) rootFeatures;
 
-    final' =
-      mapAttrs (id: feats: filter (feat: match ".*/.*" feat == null) (attrNames feats)) final;
+    fixDeps = enabledDeps: let
+      facts = genericClosure { startSet = roots; operator = step enabledDeps; };
+      enabledDeps' = listToAttrs
+        (map (f: nameValuePair "${f.id}\n${f.x}" true)
+          (filter (f: f.kind == "dep") facts));
+    in
+      if length (attrNames enabledDeps') == length (attrNames enabledDeps) then
+        facts
+      else
+        fixDeps enabledDeps';
+
+    namesOf = kind: facts: sort lessThan (map (f: f.x) (filter (f: f.kind == kind) facts));
 
   in
-    final';
-
-  preprocess-feature-tests = { assertEq, ... }: let
-    test = optionalDeps: featureDefs: expect:
-      assertEq (preprocessFeatures optionalDeps featureDefs) expect;
-  in {
-    recursive = test [ ] { a = [ "b" ]; b = [ "a" "c" ]; c = [ ]; } {
-      a = [ "c" "b" "a" ];
-      b = [ "c" "a" "b" ];
-      c = [ "c" ];
-    };
-    auto-dep = test [ "a" ] { b = [ "a" ]; } {
-      a = [ { dep = "a"; } "a" ];
-      b = [ { dep = "a"; } "a" "b" ];
-    };
-    manual-dep = test [ "a" ] { b = [ "dep:a" ]; } {
-      b = [ { dep = "a"; } "b" ];
-    };
-    strong-dep = test [ "a" ] { b = [ "a/c" ]; } {
-      a = [ { dep = "a"; } "a" ];
-      b = [ { dep = "a"; } { dep = "a"; feat = "c"; } "b" ];
-    };
-    weak-dep = test [ "a" ] { b = [ "a?/c" ]; } {
-      a = [ { dep = "a"; } "a" ];
-      b = [ { dep = "a"; feat = "c"; } "b" ];
-    };
-  };
-
-  update-feature-tests = { assertEq, ... }: let
-    testUpdate = defs: features: expect: let
-      init = mapAttrs (k: v: false) defs;
-      out = enableFeatures "pkgId" defs init features;
-      enabled = attrNames (filterAttrs (k: v: v) out);
-    in
-      assertEq enabled expect;
-  in {
-    simple1 = testUpdate { a = []; } [] [];
-    simple2 = testUpdate { a = []; } [ "a" ] [ "a" ];
-    simple3 = testUpdate { a = []; } [ "a" "a" ] [ "a" ];
-    simple4 = testUpdate { a = []; b = []; } [ "a" ] [ "a" ];
-    simple5 = testUpdate { a = []; b = []; } [ "a" "b" ] [ "a" "b" ];
-    simple6 = testUpdate { a = []; b = []; } [ "a" "b" "a" ] [ "a" "b" ];
-
-  } // (let defs = { a = []; b = [ "a" ]; }; in {
-    link1 = testUpdate defs [ "a" ] [ "a" ];
-    link2 = testUpdate defs [ "b" "a" ] [ "a" "b" ];
-    link3 = testUpdate defs [ "b" ] [ "a" "b" ];
-    link4 = testUpdate defs [ "b" "a" ] [ "a" "b" ];
-    link5 = testUpdate defs [ "b" "b" ] [ "a" "b" ];
-
-  }) // (let defs = { a = []; b = [ "a" ]; c = [ "a" ]; }; in {
-    common1 = testUpdate defs [ "a" ] [ "a" ];
-    common2 = testUpdate defs [ "b" ] [ "a" "b" ];
-    common3 = testUpdate defs [ "a" "b" ] [ "a" "b" ];
-    common4 = testUpdate defs [ "b" "a" ] [ "a" "b" ];
-    common5 = testUpdate defs [ "b" "c" ] [ "a" "b" "c" ];
-    common6 = testUpdate defs [ "a" "b" "c" ] [ "a" "b" "c" ];
-    common7 = testUpdate defs [ "b" "c" "b" ] [ "a" "b" "c" ];
-
-  }) // (let defs = { a = [ "b" "c" ]; b = [ "d" "e" ]; c = [ "f" "g"]; d = []; e = []; f = []; g = []; }; in {
-    tree1 = testUpdate defs [ "a" ] [ "a" "b" "c" "d" "e" "f" "g" ];
-    tree2 = testUpdate defs [ "b" ] [ "b" "d" "e" ];
-    tree3 = testUpdate defs [ "d" ] [ "d" ];
-    tree4 = testUpdate defs [ "d" "b" "g" ] [ "b" "d" "e" "g" ];
-    tree5 = testUpdate defs [ "c" "e" "f" ] [ "c" "e" "f" "g" ];
-
-  }) // (let defs = { a = [ "b" ]; b = [ "c" ]; c = [ "b" ]; }; in {
-    cycle1 = testUpdate defs [ "b" ] [ "b" "c" ];
-    cycle2 = testUpdate defs [ "c" ] [ "b" "c" ];
-    cycle3 = testUpdate defs [ "a" ] [ "a" "b" "c" ];
-  });
+    mapAttrs (id: facts: {
+      features = namesOf "feat" facts;
+      deps = namesOf "dep" facts;
+    }) (groupBy (f: f.id) (fixDeps { }));
 
   resolve-feature-tests = { assertEq, ... }: let
-    test = pkgSet: rootId: rootFeatures: expect: let
-      resolved = resolveFeatures { inherit pkgSet rootId rootFeatures; };
-      expect' = mapAttrs (id: feats: sort (a: b: a < b) feats) expect;
-    in
-      assertEq resolved expect';
+    test = pkgSet: rootId: rootFeatures: expect:
+      assertEq (resolveFeatures { inherit pkgSet rootId rootFeatures; }) expect;
+
+    mkDep = name: resolved: args: {
+      inherit name resolved;
+      optional = false;
+      default_features = true;
+      features = [];
+    } // args;
 
     pkgSet1 = {
       a = {
         features = { foo = [ "bar" ]; bar = []; baz = [ "b" ]; };
         dependencies = [
-          { name = "b"; resolved = "b-id"; optional = true; default_features = true; features = [ "a" ]; }
-          { name = "unused"; resolved = null; optional = true; default_features = true; features = []; }
+          (mkDep "b" "b-id" { optional = true; features = [ "a" ]; })
+          (mkDep "unused" null { optional = true; })
         ];
       };
       b-id = {
@@ -353,14 +247,14 @@ in rec {
       my-id = {
         features = { default = [ "tokio/macros" ]; };
         dependencies = [
-          { name = "tokio"; resolved = "tokio-id"; optional = false; default_features = false; features = [ "fs" ]; }
-          { name = "dep"; resolved = "dep-id"; optional = false; default_features = true; features = []; }
+          (mkDep "tokio" "tokio-id" { default_features = false; features = [ "fs" ]; })
+          (mkDep "dep" "dep-id" { })
         ];
       };
       dep-id = {
         features = { default = [ "tokio/sync" ]; };
         dependencies = [
-          { name = "tokio"; resolved = "tokio-id"; optional = false; default_features = false; features = [ "sync" ]; }
+          (mkDep "tokio" "tokio-id" { default_features = false; features = [ "sync" ]; })
         ];
       };
       tokio-id = {
@@ -369,26 +263,55 @@ in rec {
       };
     };
 
+    # `serde` is namespaced, `log` is weak.
+    pkgSet3 = {
+      a = {
+        features = { json = [ "dep:serde" "log?/std" ]; logging = [ "dep:log" ]; };
+        dependencies = [
+          (mkDep "serde" "serde-id" { optional = true; })
+          (mkDep "log" "log-id" { optional = true; default_features = false; })
+        ];
+      };
+      serde-id = { features = {}; dependencies = []; };
+      log-id = { features = { std = []; }; dependencies = []; };
+    };
+
+    noDeps = features: { inherit features; deps = []; };
+
   in {
     simple = test pkgSet1 "a" [ "foo" ] {
-      a = [ "foo" "bar" ];
-      b-id = [ ];
+      a = noDeps [ "bar" "foo" ];
     };
 
     depend = test pkgSet1 "a" [ "foo" "baz" ] {
-      a = [ "foo" "bar" "baz" "b" ];
-      b-id = [ "default" "a" ];
+      a = { features = [ "b" "bar" "baz" "foo" ]; deps = [ "b" ]; };
+      b-id = noDeps [ "a" "default" ];
     };
 
     override = test pkgSet1 "a" [ "b/bar" ] {
-      a = [ "b" ];
-      b-id = [ "default" "a" "bar" "foo" ];
+      a = { features = [ "b" ]; deps = [ "b" ]; };
+      b-id = noDeps [ "a" "bar" "default" "foo" ];
     };
 
     merge = test pkgSet2 "my-id" [ "default" ] {
-      my-id = [ "default" ];
-      dep-id = [ "default" ];
-      tokio-id = [ "fs" "sync" "macros" ];
+      my-id = noDeps [ "default" ];
+      dep-id = noDeps [ "default" ];
+      tokio-id = noDeps [ "fs" "macros" "sync" ];
+    };
+
+    namespaced = test pkgSet3 "a" [ "json" ] {
+      a = { features = [ "json" ]; deps = [ "serde" ]; };
+      serde-id = noDeps [ ];
+    };
+
+    weak-enabled = test pkgSet3 "a" [ "json" "logging" ] {
+      a = { features = [ "json" "logging" ]; deps = [ "log" "serde" ]; };
+      serde-id = noDeps [ ];
+      log-id = noDeps [ "std" ];
+    };
+
+    weak-root = test pkgSet3 "a" [ "log?/std" ] {
+      a = noDeps [ ];
     };
   };
 

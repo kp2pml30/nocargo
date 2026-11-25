@@ -108,8 +108,7 @@
             _0006-sanitize-relative-path = support.sanitize-relative-path-tests;
 
             _0100-pkg-info-from-toml = pkg-info.pkg-info-from-toml-tests;
-            _0101-preprocess-feature = resolve.preprocess-feature-tests;
-            _0102-update-feature = resolve.update-feature-tests;
+            _0101-pkg-info-from-registry = pkg-info.pkg-info-from-registry-tests;
             _0103-resolve-feature = resolve.resolve-feature-tests;
 
             _0200-resolve-deps = resolve.resolve-deps-tests;

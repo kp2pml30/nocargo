@@ -223,6 +223,21 @@ rec {
         mapAttrsToList collectTargetDeps target;
     };
 
+  pkg-info-from-registry-tests = { assertEq, ... }: {
+    features2 = let
+      info = mkPkgInfoFromRegistry (args: args) {
+        name = "foo";
+        vers = "1.0.0";
+        deps = [];
+        cksum = "0";
+        v = 2;
+        features = { std = []; };
+        features2 = { json = [ "dep:serde" ]; };
+      };
+    in
+      assertEq info.features { std = []; json = [ "dep:serde" ]; };
+  };
+
   pkg-info-from-toml-tests = { assertEq, ... }: {
     simple = let
       cargoToml = fromTOML (readFile ../tests/tokio-app/Cargo.toml);
