@@ -1,10 +1,10 @@
 { lib, self }:
 let
-  inherit (builtins) fromTOML toJSON match tryEval split;
+  inherit (builtins) fromTOML toJSON match tryEval split pathExists genericClosure storeDir intersectAttrs;
   inherit (lib)
     readFile mapAttrs mapAttrs' makeOverridable warnIf
-    isString hasPrefix
-    filter flatten elem elemAt listToAttrs subtractLists concatStringsSep
+    isString isAttrs hasPrefix
+    filter flatten elem elemAt listToAttrs subtractLists concatStringsSep concatMap optional genAttrs
     attrNames attrValues recursiveUpdate optionalAttrs;
   inherit (self.pkg-info) mkPkgInfoFromCargoToml getPkgInfoFromIndex toPkgId;
   inherit (self.resolve) resolveDepsFromLock resolveFeatures;
@@ -89,37 +89,130 @@ rec {
     , stdenv ? default.stdenv
     }:
     let
-      manifest = fromTOML (readFile (src + "/Cargo.toml"));
+      manifest = readManifest src;
 
       profiles = profilesFromManifest manifest;
 
-      selected = flatten (map (glob: globMatchDir glob src) manifest.workspace.members);
-      excluded = map sanitizeRelativePath (manifest.workspace.exclude or []);
-      members = subtractLists excluded selected;
-
       lock = fromTOML (readFile (src + "/Cargo.lock"));
       # We don't distinguish between v1 and v2. But v3 is different from both.
-      lockVersionSet = { lockVersion = lock.version or 2; };
+      lockVersion = lock.version or 2;
 
-      localSrcInfos =
-        listToAttrs
-        (map (relativePath:
-          let
-            memberRoot = src + ("/" + relativePath);
-            memberManifest = fromTOML (readFile (memberRoot + "/Cargo.toml")) // lockVersionSet;
-          in {
-            name = toPkgId memberManifest.package;
-            value = mkPkgInfoFromCargoToml memberManifest memberRoot;
-          }
-          ) (if manifest ? workspace then members else [ "" ]));
+      # Names of locked packages with `source` satisfying `pred`.
+      lockedNames = pred: genAttrs
+        (map (pkg: pkg.name) (filter (pkg: pred (pkg.source or null)) lock.package))
+        (_: null);
+
+      localSrcInfos = collectLocalCrates lockVersion (lockedNames (source: source == null))
+        (workspaceRoots src manifest);
 
     in mkRustPackageSet {
+      # A git repository may contain several crates, keyed by name.
       gitSrcInfos = mapAttrs (url: src:
-        mkPkgInfoFromCargoToml (fromTOML (readFile (src + "/Cargo.toml")) // lockVersionSet) src
+        mapAttrs' (id: info: { inherit (info) name; value = info; })
+          (collectLocalCrates lockVersion (lockedNames (source: source != null && hasPrefix "git+${url}" source))
+            (workspaceRoots src (readManifest src)))
       ) gitSrcs;
 
       inherit lock profiles localSrcInfos buildRustCrate buildCrateOverrides registries rustc stdenv;
     };
+
+  readManifest = root: fromTOML (readFile (root + "/Cargo.toml"));
+
+  depTableNames = genAttrs [ "dependencies" "dev-dependencies" "build-dependencies" ] (_: null);
+
+  # Package roots of a workspace or a single package.
+  workspaceRoots = root: manifest:
+    if manifest ? workspace then
+      let
+        selected = flatten (map (glob: globMatchDir glob root) (manifest.workspace.members or []));
+        excluded = map sanitizeRelativePath (manifest.workspace.exclude or []);
+        members = filter
+          (path: pathExists (root + "/${path}/Cargo.toml"))
+          (subtractLists excluded selected);
+      in
+        optional (manifest ? package) root ++ map (path: root + "/${path}") members
+    else
+      [ root ];
+
+  # The closest directory containing a `[workspace]` manifest, starting from `dir` itself.
+  findWorkspaceRoot = dir:
+    if pathExists (dir + "/Cargo.toml") && readManifest dir ? workspace then
+      dir
+    else
+      let parent = dirOf dir; in
+      if parent == dir || toString parent == storeDir then null else findWorkspaceRoot parent;
+
+  # Resolve `workspace = true` package fields and dependencies against the workspace at `wsRoot`,
+  # and make dependency paths absolute.
+  normalizeManifest = wsRoot: root: manifest: let
+    ws = if wsRoot == null then {} else (readManifest wsRoot).workspace or {};
+    wsDeps = mapAttrs (name: dep:
+      if isString dep then
+        { version = dep; }
+      else
+        dep // optionalAttrs (dep ? path) { path = wsRoot + "/${dep.path}"; }
+    ) (ws.dependencies or {});
+
+    isInherited = v: isAttrs v && v.workspace or false;
+
+    fixDep = name: dep:
+      if isInherited dep then
+        let
+          base = wsDeps.${name}
+            or (throw "Dependency `${name}` of ${toString root} is not in workspace dependencies");
+        in
+          base // removeAttrs dep [ "workspace" "features" ] // {
+            features = base.features or [] ++ dep.features or [];
+          }
+      else if isAttrs dep && dep ? path then
+        dep // { path = root + "/${dep.path}"; }
+      else
+        dep;
+
+    fixDepTables = table: table // mapAttrs (_: mapAttrs fixDep) (intersectAttrs depTableNames table);
+
+    package = mapAttrs (field: v:
+      if isInherited v then
+        ws.package.${field}
+          or (throw "Field `package.${field}` of ${toString root} is not in workspace")
+      else
+        v
+    ) manifest.package;
+  in
+    fixDepTables manifest
+    // { inherit package; }
+    // optionalAttrs (manifest ? target) { target = mapAttrs (_: fixDepTables) manifest.target; };
+
+  # Pkg infos of local crates at `roots` and all crates in `lockedNames` reachable from them via
+  # path dependencies, which may be outside the workspace.
+  collectLocalCrates = lockVersion: lockedNames: roots: let
+    load = root: {
+      key = toString root;
+      inherit root;
+      manifest = normalizeManifest (findWorkspaceRoot root) root (readManifest root);
+    };
+
+    pathDeps = manifest:
+      concatMap
+        (table: concatMap
+          (deps: concatMap
+            (name: let dep = deps.${name}; in
+              optional (isAttrs dep && dep ? path && lockedNames ? ${dep.package or name}) dep.path)
+            (attrNames deps))
+          (attrValues (intersectAttrs depTableNames table)))
+        ([ manifest ] ++ attrValues (manifest.target or {}));
+
+    crates = genericClosure {
+      startSet = map load roots;
+      operator = { manifest, ... }: map load (pathDeps manifest);
+    };
+  in
+    listToAttrs (map ({ root, manifest, ... }: {
+      name = toPkgId manifest.package;
+      value = mkPkgInfoFromCargoToml (manifest // { inherit lockVersion; }) root // {
+        manifest = intersectAttrs (genAttrs [ "package" "lib" "bin" ] (_: null)) manifest;
+      };
+    }) crates);
 
   # -> { <profile-name> = { <member-pkg-name> = <drv>; }; }
   mkRustPackageSet =
@@ -156,8 +249,9 @@ rec {
             args
           // { inherit source; } # `source` is for crate id, which is used for overrides.
         else if kind == "git" then
-          gitSrcInfos.${url}
-            or (throw "Git source `${url}` not found. Please define it in `gitSrcs`.")
+          (gitSrcInfos.${url}
+            or (throw "Git source `${url}` not found. Please define it in `gitSrcs`.")).${name}
+            or (throw "Crate `${name}` not found in git source `${url}`")
         else
           throw "Invalid source: ${source}";
 
@@ -209,6 +303,7 @@ rec {
           pkgsBuild = mapAttrs (id: { features, deps }: let info = pkgSet.${id}; in
             buildRustCrate' info {
               inherit (info) version src procMacro;
+              manifest = info.manifest or null;
               inherit features profile rustc;
               pname = info.name;
               capLints = if localSrcInfos ? ${id} then null else "allow";
@@ -222,6 +317,7 @@ rec {
           pkgs = mapAttrs (id: { features, deps }: let info = pkgSet.${id}; in
             buildRustCrate' info {
               inherit (info) version src links procMacro;
+              manifest = info.manifest or null;
               inherit features profile rustc;
               pname = info.name;
               capLints = if localSrcInfos ? ${id} then null else "allow";

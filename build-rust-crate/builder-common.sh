@@ -88,7 +88,12 @@ runRustc() {
 convertCargoToml() {
     local cargoToml="${1:-"$(pwd)/Cargo.toml"}"
     cargoTomlJson="$(mktemp "$(dirname "$cargoToml")/Cargo.json.XXX")"
-    toml2json <"$cargoToml" >"$cargoTomlJson"
+    # Local crates get a manifest with workspace inheritance already resolved.
+    if [[ -n "${manifestJson:-}" ]]; then
+        printf '%s' "$manifestJson" >"$cargoTomlJson"
+    else
+        toml2json <"$cargoToml" >"$cargoTomlJson"
+    fi
 }
 
 # https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates

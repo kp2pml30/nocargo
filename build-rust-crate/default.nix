@@ -15,6 +15,8 @@
 , buildFlags ? []
 , buildScriptBuildFlags ? []
 , procMacro ? false
+# Normalized `package`, `lib` and `bin` tables, replacing the ones in `Cargo.toml`.
+, manifest ? null
 
 , nativeBuildInputs ? []
 , propagatedBuildInputs ? []
@@ -98,6 +100,7 @@ let
     inherit capLints;
 
     RUSTC = "${rustc}/bin/rustc";
+    manifestJson = if manifest != null then builtins.toJSON manifest else null;
   } // removeAttrs args [
     "pname"
     "version"
@@ -113,6 +116,7 @@ let
     "buildFlags"
     "buildScriptBuildFlags"
     "procMacro"
+    "manifest"
     "nativeBuildInputs"
     "propagatedBuildInputs"
   ];

@@ -1,6 +1,6 @@
 { lib, ... }:
 let
-  inherit (builtins) readFile readDir fromJSON fromTOML toString attrNames match;
+  inherit (builtins) readFile readDir fromJSON fromTOML toString attrNames match concatLists;
   inherit (lib)
     stringLength splitString replaceStrings substring isString toLower
     filter listToAttrs mapAttrs mapAttrsToList optionalAttrs warnIf;
@@ -220,7 +220,7 @@ rec {
       procMacro = args.lib.proc-macro or false;
       dependencies =
         collectTargetDeps null args ++
-        mapAttrsToList collectTargetDeps target;
+        concatLists (mapAttrsToList collectTargetDeps target);
     };
 
   pkg-info-from-registry-tests = { assertEq, ... }: {
