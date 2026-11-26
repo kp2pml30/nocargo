@@ -10,4 +10,5 @@ let
     resolve = callLib ./resolve.nix;
     support = callLib ./support.nix;
   };
-in self
+in
+self

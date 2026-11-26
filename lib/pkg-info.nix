@@ -1,58 +1,104 @@
 { lib, ... }:
 let
-  inherit (builtins) readFile readDir fromJSON fromTOML toString attrNames match concatLists;
+  inherit (builtins)
+    readFile
+    readDir
+    fromJSON
+    fromTOML
+    toString
+    attrNames
+    match
+    concatLists
+    ;
   inherit (lib)
-    stringLength splitString replaceStrings substring isString toLower
-    filter listToAttrs mapAttrs mapAttrsToList optionalAttrs warnIf;
+    stringLength
+    splitString
+    replaceStrings
+    substring
+    isString
+    toLower
+    filter
+    listToAttrs
+    mapAttrs
+    mapAttrsToList
+    optionalAttrs
+    warnIf
+    ;
 in
 rec {
-  toPkgId = { name, version, source ? null, ... }:
+  toPkgId =
+    {
+      name,
+      version,
+      source ? null,
+      ...
+    }:
     if source != null then
       "${name} ${version} (${source})"
     else
       # Local crates must be collide names. Simply use the name to make overriding easier.
       name;
 
-  mkIndex = fetchurl: path: overrides: let
-    # TODO: We currently only support legacy format used by crates.io-index.
-    # https://github.com/rust-lang/cargo/blob/2f3df16921deb34a92700f4d5a7ecfb424739558/src/cargo/sources/registry/mod.rs#L230-L244
-    downloadEndpoint = (fromJSON (readFile (path + "/config.json"))).dl;
-    mkDownloadUrl =
-      assert match ".*\\{.*" downloadEndpoint == null;
-      { name, version, ... }: "${downloadEndpoint}/${name}/${version}/download";
+  mkIndex =
+    fetchurl: path: overrides:
+    let
+      # TODO: We currently only support legacy format used by crates.io-index.
+      # https://github.com/rust-lang/cargo/blob/2f3df16921deb34a92700f4d5a7ecfb424739558/src/cargo/sources/registry/mod.rs#L230-L244
+      downloadEndpoint = (fromJSON (readFile (path + "/config.json"))).dl;
+      mkDownloadUrl =
+        assert match ".*\\{.*" downloadEndpoint == null;
+        { name, version, ... }:
+        "${downloadEndpoint}/${name}/${version}/download";
 
-    mkSrc = { name, version, sha256 }@args: fetchurl {
-      # Use the same name as nixpkgs to benifit from cache.
-      # https://github.com/NixOS/nixpkgs/pull/122158/files#diff-eb8b8729bfd36f8878c2d8a99f67a2bebb912e9f78c5d2a72457b1f572e26986R67
-      name = "crate-${name}-${version}.tar.gz";
-      url = mkDownloadUrl args;
-      inherit sha256;
-    };
+      mkSrc =
+        {
+          name,
+          version,
+          sha256,
+        }@args:
+        fetchurl {
+          # Use the same name as nixpkgs to benifit from cache.
+          # https://github.com/NixOS/nixpkgs/pull/122158/files#diff-eb8b8729bfd36f8878c2d8a99f67a2bebb912e9f78c5d2a72457b1f572e26986R67
+          name = "crate-${name}-${version}.tar.gz";
+          url = mkDownloadUrl args;
+          inherit sha256;
+        };
 
-    go = path:
-      mapAttrs (k: v:
-        if v == "directory"
-          then go (path + "/${k}")
-          else mkPkgInfoSet mkSrc k (readFile (path + "/${k}")) (overrides.${k} or null)
-      ) (removeAttrs (readDir path) [ "config.json" ]);
-  in
+      go =
+        path:
+        mapAttrs (
+          k: v:
+          if v == "directory" then
+            go (path + "/${k}")
+          else
+            mkPkgInfoSet mkSrc k (readFile (path + "/${k}")) (overrides.${k} or null)
+        ) (removeAttrs (readDir path) [ "config.json" ]);
+    in
     go path // { __registry_index = true; };
 
   # Get pkg info of the given package, with overrides applied if exists.
-  getPkgInfoFromIndex = index: { name, version, checksum ? null, ... }: let
-    name' = toLower name;
-    len = stringLength name';
-    crate =
-      if len == 1 then
-        index."1".${name'} or null
-      else if len == 2 then
-        index."2".${name'} or null
-      else if len == 3 then
-        index."3".${substring 0 1 name'}.${name'} or null
-      else
-        index.${substring 0 2 name'}.${substring 2 2 name'}.${name'} or null;
-    info = crate.${version} or null;
-  in
+  getPkgInfoFromIndex =
+    index:
+    {
+      name,
+      version,
+      checksum ? null,
+      ...
+    }:
+    let
+      name' = toLower name;
+      len = stringLength name';
+      crate =
+        if len == 1 then
+          index."1".${name'} or null
+        else if len == 2 then
+          index."2".${name'} or null
+        else if len == 3 then
+          index."3".${substring 0 1 name'}.${name'} or null
+        else
+          index.${substring 0 2 name'}.${substring 2 2 name'}.${name'} or null;
+      info = crate.${version} or null;
+    in
     if !(index ? __registry_index) then
       throw "Invalid registry. Do you forget `mkIndex` on registry paths?"
     else if crate == null then
@@ -65,16 +111,24 @@ rec {
       info;
 
   # Make a set of pkg infos keyed by version.
-  mkPkgInfoSet = mkSrc: name: content: override: let
-    lines = filter (line: line != "") (splitString "\n" content);
-    parseLine = line: let parsed = fromJSON line; in {
-      name = parsed.vers;
-      value = mkPkgInfoFromRegistry mkSrc parsed
-        // optionalAttrs (override != null) {
-          __override = override;
+  mkPkgInfoSet =
+    mkSrc: name: content: override:
+    let
+      lines = filter (line: line != "") (splitString "\n" content);
+      parseLine =
+        line:
+        let
+          parsed = fromJSON line;
+        in
+        {
+          name = parsed.vers;
+          value =
+            mkPkgInfoFromRegistry mkSrc parsed
+            // optionalAttrs (override != null) {
+              __override = override;
+            };
         };
-    };
-  in
+    in
     listToAttrs (map parseLine lines);
 
   # Package info:
@@ -106,39 +160,62 @@ rec {
   mkPkgInfoFromRegistry =
     mkSrc:
     # https://github.com/rust-lang/cargo/blob/2f3df16921deb34a92700f4d5a7ecfb424739558/src/cargo/sources/registry/mod.rs#L259
-    { name, vers, deps, features, cksum, yanked ? false, links ? null, v ? 1, features2 ? {}, ... }:
+    {
+      name,
+      vers,
+      deps,
+      features,
+      cksum,
+      yanked ? false,
+      links ? null,
+      v ? 1,
+      features2 ? { },
+      ...
+    }:
     if v > 2 then
       throw "${name} ${vers}: Registry layout version ${toString v} is too new to understand"
     else
-    {
-      inherit name yanked links;
-      # V2 moves features using `dep:` or `?` syntax into `features2`.
-      features = features // features2;
-      version = vers;
-      sha256 = cksum;
-      dependencies = map sanitizeDep deps;
-      src = mkSrc {
-        inherit name;
+      {
+        inherit name yanked links;
+        # V2 moves features using `dep:` or `?` syntax into `features2`.
+        features = features // features2;
         version = vers;
         sha256 = cksum;
+        dependencies = map sanitizeDep deps;
+        src = mkSrc {
+          inherit name;
+          version = vers;
+          sha256 = cksum;
+        };
       };
-    };
 
   # Sanitize a dependency reference.
   # Handling `package` and fill missing fields.
   sanitizeDep =
-    { name
-    , package ? name
-    , version ? null # Cargo.toml use `version`
-    , req ? version
-    , features ? []
-    , optional ? false
-    , default_features ? true
-    , target ? null
-    , kind
-    , ...
-    }@args: args // {
-      inherit name package req features optional default_features target kind;
+    {
+      name,
+      package ? name,
+      version ? null, # Cargo.toml use `version`
+      req ? version,
+      features ? [ ],
+      optional ? false,
+      default_features ? true,
+      target ? null,
+      kind,
+      ...
+    }@args:
+    args
+    // {
+      inherit
+        name
+        package
+        req
+        features
+        optional
+        default_features
+        target
+        kind
+        ;
 
       # Note that `package` == `name` is not the same as omitting `package`.
       # See: https://github.com/rust-lang/cargo/issues/6827
@@ -151,123 +228,156 @@ rec {
       #   - If `package` isn't set, the code name (for `use` or `extern crate`) of the dependency is its lib name.
       #     `--extern` also use its own lib name.
       #   - If `package` is set, the code name and `--extern` both use the renamed `name`.
-    } // optionalAttrs (args.package or null != null) {
-      rename = replaceStrings ["-"] ["_"] name;
+    }
+    // optionalAttrs (args.package or null != null) {
+      rename = replaceStrings [ "-" ] [ "_" ] name;
     };
 
   # Build a simplified crate into from a parsed Cargo.toml.
-  mkPkgInfoFromCargoToml = { lockVersion ? 3, package, features ? {}, target ? {}, ... }@args: src: let
-    encodeQuery = if lockVersion >= 4 then encodeFormUrl else lib.id;
+  mkPkgInfoFromCargoToml =
+    {
+      lockVersion ? 3,
+      package,
+      features ? { },
+      target ? { },
+      ...
+    }@args:
+    src:
+    let
+      encodeQuery = if lockVersion >= 4 then encodeFormUrl else lib.id;
 
-    transDeps = target: kind:
-      mapAttrsToList (name: v:
-        {
-          inherit name target kind;
-          package = v.package or name;
-          # For path or git dependencies, `version` can be omitted.
-          req = if isString v then v else v.version or null;
-          features = v.features or [];
-          optional = v.optional or false;
-          # It's `default-features` in Cargo.toml, but `default_features` in index and in pkg info.
-          default_features =
-            warnIf (v ? default_features) "Ignoring `default_features`. Do you mean `default-features`?"
-            (v.default-features or true);
+      transDeps =
+        target: kind:
+        mapAttrsToList (
+          name: v:
+          {
+            inherit name target kind;
+            package = v.package or name;
+            # For path or git dependencies, `version` can be omitted.
+            req = if isString v then v else v.version or null;
+            features = v.features or [ ];
+            optional = v.optional or false;
+            # It's `default-features` in Cargo.toml, but `default_features` in index and in pkg info.
+            default_features = warnIf (
+              v ? default_features
+            ) "Ignoring `default_features`. Do you mean `default-features`?" (v.default-features or true);
 
-          # This is used for dependency resoving inside Cargo.lock.
-          source =
-            if v ? registry then
-              throw "Dependency with `registry` is not supported. Use `registry-index` with explicit URL instead."
-            else if v ? registry-index then
-              "registry+${v.registry-index}"
-            else if v ? git then
-              # For v1 and v2, git-branch URLs are encoded as "git+url" with no query parameters.
-              if v ? branch && lockVersion >= 3 then
-                "git+${v.git}?branch=${encodeQuery v.branch}"
-              else if v ? tag then
-                "git+${v.git}?tag=${encodeQuery v.tag}"
-              else if v ? rev then
-                "git+${v.git}?rev=${encodeQuery v.rev}"
+            # This is used for dependency resoving inside Cargo.lock.
+            source =
+              if v ? registry then
+                throw "Dependency with `registry` is not supported. Use `registry-index` with explicit URL instead."
+              else if v ? registry-index then
+                "registry+${v.registry-index}"
+              else if v ? git then
+                # For v1 and v2, git-branch URLs are encoded as "git+url" with no query parameters.
+                if v ? branch && lockVersion >= 3 then
+                  "git+${v.git}?branch=${encodeQuery v.branch}"
+                else if v ? tag then
+                  "git+${v.git}?tag=${encodeQuery v.tag}"
+                else if v ? rev then
+                  "git+${v.git}?rev=${encodeQuery v.rev}"
+                else
+                  "git+${v.git}"
+              else if v ? path then
+                # Local crates are mark with `null` source.
+                null
               else
-                "git+${v.git}"
-            else if v ? path then
-              # Local crates are mark with `null` source.
-              null
-            else
-              # Default to use crates.io registry.
-              # N.B. This is necessary and must not be `null`, or it will be indinstinguishable
-              # with local crates or crates from other registries.
-              "registry+https://github.com/rust-lang/crates.io-index";
+                # Default to use crates.io registry.
+                # N.B. This is necessary and must not be `null`, or it will be indinstinguishable
+                # with local crates or crates from other registries.
+                "registry+https://github.com/rust-lang/crates.io-index";
 
-        # See `sanitizeDep`
-        } // optionalAttrs (v.package or null != null) {
-          rename = replaceStrings ["-"] ["_"] name;
-        });
+            # See `sanitizeDep`
+          }
+          // optionalAttrs (v.package or null != null) {
+            rename = replaceStrings [ "-" ] [ "_" ] name;
+          }
+        );
 
-    collectTargetDeps = target: { dependencies ? {}, dev-dependencies ? {}, build-dependencies ? {}, ... }:
-      transDeps target "normal" dependencies ++
-      transDeps target "dev" dev-dependencies ++
-      transDeps target "build" build-dependencies;
+      collectTargetDeps =
+        target:
+        {
+          dependencies ? { },
+          dev-dependencies ? { },
+          build-dependencies ? { },
+          ...
+        }:
+        transDeps target "normal" dependencies
+        ++ transDeps target "dev" dev-dependencies
+        ++ transDeps target "build" build-dependencies;
 
-  in
+    in
     {
       inherit (package) name version;
       inherit src features;
       links = package.links or null;
-      dependencies =
-        collectTargetDeps null args ++
-        concatLists (mapAttrsToList collectTargetDeps target);
+      dependencies = collectTargetDeps null args ++ concatLists (mapAttrsToList collectTargetDeps target);
     };
 
   # `application/x-www-form-urlencoded` of a printable ASCII string, as used by Cargo.lock v4.
-  encodeFormUrl = let
-    special = lib.stringToCharacters " !\"#$%&'()+,/:;<=>?@[\\]^`{|}~";
-    encode = c: if c == " " then "+" else "%${lib.toUpper (lib.toHexString (lib.strings.charToInt c))}";
-  in
+  encodeFormUrl =
+    let
+      special = lib.stringToCharacters " !\"#$%&'()+,/:;<=>?@[\\]^`{|}~";
+      encode = c: if c == " " then "+" else "%${lib.toUpper (lib.toHexString (lib.strings.charToInt c))}";
+    in
     replaceStrings special (map encode special);
 
   pkg-info-from-registry-tests = { assertEq, ... }: {
-    features2 = let
-      info = mkPkgInfoFromRegistry (args: args) {
-        name = "foo";
-        vers = "1.0.0";
-        deps = [];
-        cksum = "0";
-        v = 2;
-        features = { std = []; };
-        features2 = { json = [ "dep:serde" ]; };
+    features2 =
+      let
+        info = mkPkgInfoFromRegistry (args: args) {
+          name = "foo";
+          vers = "1.0.0";
+          deps = [ ];
+          cksum = "0";
+          v = 2;
+          features = {
+            std = [ ];
+          };
+          features2 = {
+            json = [ "dep:serde" ];
+          };
+        };
+      in
+      assertEq info.features {
+        std = [ ];
+        json = [ "dep:serde" ];
       };
-    in
-      assertEq info.features { std = []; json = [ "dep:serde" ]; };
 
     encode-form-url = assertEq (encodeFormUrl "feat/x y%") "feat%2Fx+y%25";
   };
 
   pkg-info-from-toml-tests = { assertEq, ... }: {
-    simple = let
-      cargoToml = fromTOML (readFile ../tests/tokio-app/Cargo.toml);
-      info = mkPkgInfoFromCargoToml cargoToml "<src>";
+    simple =
+      let
+        cargoToml = fromTOML (readFile ../tests/tokio-app/Cargo.toml);
+        info = mkPkgInfoFromCargoToml cargoToml "<src>";
 
-      expected = {
-        name = "tokio-app";
-        version = "0.0.0";
-        features = { };
-        src = "<src>";
-        links = null;
-        dependencies = [
-          {
-            name = "tokio";
-            package = "tokio";
-            default_features = false;
-            features = [ "rt-multi-thread" "macros" "time" ];
-            kind = "normal";
-            optional = false;
-            req = "1";
-            target = null;
-            source = "registry+https://github.com/rust-lang/crates.io-index";
-          }
-        ];
-      };
-    in
+        expected = {
+          name = "tokio-app";
+          version = "0.0.0";
+          features = { };
+          src = "<src>";
+          links = null;
+          dependencies = [
+            {
+              name = "tokio";
+              package = "tokio";
+              default_features = false;
+              features = [
+                "rt-multi-thread"
+                "macros"
+                "time"
+              ];
+              kind = "normal";
+              optional = false;
+              req = "1";
+              target = null;
+              source = "registry+https://github.com/rust-lang/crates.io-index";
+            }
+          ];
+        };
+      in
       assertEq info expected;
 
     build-deps =
@@ -295,23 +405,40 @@ rec {
           ];
         };
       in
-        assertEq info expected;
+      assertEq info expected;
 
-    git-branch-v4 = let
-      info = mkPkgInfoFromCargoToml {
-        lockVersion = 4;
-        package = { name = "foo"; version = "0.0.0"; };
-        dependencies.bar = { git = "https://example.com/bar"; branch = "feat/x"; };
-      } "<src>";
-    in
+    git-branch-v4 =
+      let
+        info = mkPkgInfoFromCargoToml {
+          lockVersion = 4;
+          package = {
+            name = "foo";
+            version = "0.0.0";
+          };
+          dependencies.bar = {
+            git = "https://example.com/bar";
+            branch = "feat/x";
+          };
+        } "<src>";
+      in
       assertEq (builtins.head info.dependencies).source "git+https://example.com/bar?branch=feat%2Fx";
 
-    target-deps = let
-      info = mkPkgInfoFromCargoToml {
-        package = { name = "foo"; version = "0.0.0"; };
-        target."cfg(unix)".dependencies = { a = "1"; b = "1"; };
-      } "<src>";
-    in
-      assertEq (map (dep: dep.name) info.dependencies) [ "a" "b" ];
+    target-deps =
+      let
+        info = mkPkgInfoFromCargoToml {
+          package = {
+            name = "foo";
+            version = "0.0.0";
+          };
+          target."cfg(unix)".dependencies = {
+            a = "1";
+            b = "1";
+          };
+        } "<src>";
+      in
+      assertEq (map (dep: dep.name) info.dependencies) [
+        "a"
+        "b"
+      ];
   };
 }

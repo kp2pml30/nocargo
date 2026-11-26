@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2018"
 
 [dependencies]
+RustyXML = "=0.3.0" # Should be lowered.
 b = "=0.2.0"
 cc = "=1.0.73"
 fnv = "=1.0.7"
-RustyXML = "=0.3.0" # Should be lowered.

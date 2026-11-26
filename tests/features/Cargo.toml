@@ -7,6 +7,6 @@ edition = "2018"
 semver = { version = "1.0.12", optional = true }
 
 [features]
-default = [ "a" ]
 a = ["default", "semver/serde"]
 b = []
+default = ["a"]

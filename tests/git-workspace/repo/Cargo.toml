@@ -2,8 +2,8 @@
 members = ["a", "b"]
 
 [workspace.package]
-version = "0.1.0"
 edition = "2021"
+version = "0.1.0"
 
 [workspace.dependencies]
 a = { path = "a" }
