@@ -43,10 +43,6 @@
 
         packages = {
           toml2json = pkgs.callPackage ./toml2json { };
-
-          cache = pkgs.callPackage ./cache {
-            inherit (lib) mkRustPackageOrWorkspace;
-          };
         };
 
         checks = let

@@ -14,8 +14,6 @@ Build Rust crates with *Nix Build System*.
 <details>
 <summary>Feature checklist</summary>
 
-- Binary cache
-  - [x] Top 256 popular crate versions with default features
 - Nix library
   - [ ] Non-flake support.
   - [x] `[workspace]`
@@ -40,9 +38,6 @@ Build Rust crates with *Nix Build System*.
 
 ## Start with Nix flake
 
-1. (Optional) Add binary substituters for pre-built popular crates, by either
-   - Install `cachix` and run `cachix use nocargo` ([see more detail about `cachix`](https://app.cachix.org/cache/nocargo)), or
-   - Manually add substituter `https://nocargo.cachix.org` with public key `nocargo.cachix.org-1:W6jkp5htZBA1tUdU8XHLaD7zBrIFnor0MsLhHgrJeHk=`
 1. Enter the root directory of your rust workspace or package. Currently, you should have `Cargo.lock` already created by `cargo`.
 1. Write `flake.nix` by following [the next section](#example-flake.nix-structure).
 1. Check flake outputs with `nix flake show`. Typically, the layout would be like,
