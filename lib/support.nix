@@ -21,6 +21,7 @@ let
     isString
     isAttrs
     hasPrefix
+    removePrefix
     filter
     flatten
     elem
@@ -132,6 +133,8 @@ rec {
     {
       src, # : Path
       gitSrcs ? { }, # : Attrset Path
+      # Sources of path dependencies, keyed by their path relative to `src`.
+      pathSrcs ? { }, # : Attrset Path
       buildCrateOverrides ? { }, # : Attrset (Attrset _)
       extraRegistries ? { }, # : Attrset Registry
       registries ? defaultRegistries // extraRegistries,
@@ -153,7 +156,7 @@ rec {
         pred:
         genAttrs (map (pkg: pkg.name) (filter (pkg: pred (pkg.source or null)) lock.package)) (_: null);
 
-      localSrcInfos = collectLocalCrates lockVersion (lockedNames (source: source == null)) src (
+      localSrcInfos = collectLocalCrates lockVersion (lockedNames (source: source == null)) src pathSrcs (
         workspaceRoots src manifest
       );
 
@@ -170,7 +173,7 @@ rec {
           (
             collectLocalCrates lockVersion (lockedNames (
               source: source != null && head (splitString "#" source) == "git+${url}"
-            )) src (workspaceRoots src (readManifest src))
+            )) src { } (workspaceRoots src (readManifest src))
           )
       ) gitSrcs;
 
@@ -275,13 +278,27 @@ rec {
   # Pkg infos of local crates at `roots` and all crates in `lockedNames` reachable from them via
   # path dependencies, which may be outside the workspace.
   collectLocalCrates =
-    lockVersion: lockedNames: srcRoot: roots:
+    lockVersion: lockedNames: srcRoot: pathSrcs: roots:
     let
-      load = root: {
-        key = toString root;
-        inherit root;
-        manifest = normalizeManifest (findWorkspaceRoot root) root (readManifest root);
-      };
+      srcRootPrefix = toString srcRoot + "/";
+      substitute =
+        root:
+        let
+          path = toString root;
+          rel = removePrefix srcRootPrefix path;
+        in
+        if rel != path && pathSrcs ? ${rel} then pathSrcs.${rel} else root;
+
+      load =
+        root':
+        let
+          root = substitute root';
+        in
+        {
+          key = toString root;
+          inherit root;
+          manifest = normalizeManifest (findWorkspaceRoot root) root (readManifest root);
+        };
 
       pathDeps =
         manifest:

@@ -138,4 +138,15 @@ in
       [[ -x ${app.bin}/bin/tokio-app ]]
       touch $out
     '';
+
+  # A path dependency missing from `src` is taken from `pathSrcs` and patched by an override.
+  _1003-path-srcs =
+    let
+      ws = mkRustPackageOrWorkspace {
+        src = ./path-srcs/app;
+        pathSrcs."third-party/vendored" = ./path-srcs/vendored;
+        buildCrateOverrides.vendored = old: { patches = [ ./path-srcs/greeting.patch ]; };
+      };
+    in
+    mapAttrs (_: pkgs: shouldBeHelloWorld pkgs.path-srcs) { inherit (ws) dev release; };
 }
