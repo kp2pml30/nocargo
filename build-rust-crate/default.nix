@@ -1,4 +1,4 @@
-{ lib, nocargo-lib, stdenv, buildPackages, toml2json, jq }:
+{ lib, nocargo-lib, stdenv, buildPackages, yj, jq }:
 { pname
 , version
 , src
@@ -100,7 +100,7 @@ let
       sourceRoot="$sourceRoot/${crateSubdir}"
     '';
 
-    nativeBuildInputs = [ toml2json jq ] ++ nativeBuildInputs;
+    nativeBuildInputs = [ yj jq ] ++ nativeBuildInputs;
 
     sharedLibraryExt = stdenv.hostPlatform.extensions.sharedLibrary;
 

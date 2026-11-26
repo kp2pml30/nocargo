@@ -92,7 +92,7 @@ convertCargoToml() {
     if [[ -n "${manifestJson:-}" ]]; then
         printf '%s' "$manifestJson" >"$cargoTomlJson"
     else
-        toml2json <"$cargoToml" >"$cargoTomlJson"
+        yj -tj <"$cargoToml" >"$cargoTomlJson"
     fi
 }
 

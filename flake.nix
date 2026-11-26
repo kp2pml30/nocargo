@@ -33,16 +33,11 @@
         lib = rec {
           mkIndex = nocargo-lib.pkg-info.mkIndex pkgs.fetchurl;
           buildRustCrate = pkgs.callPackage ./build-rust-crate {
-            inherit (packages) toml2json;
             inherit nocargo-lib;
           };
           mkRustPackageOrWorkspace = pkgs.callPackage nocargo-lib.support.mkRustPackageOrWorkspace {
             inherit defaultRegistries buildRustCrate;
           };
-        };
-
-        packages = {
-          toml2json = pkgs.callPackage ./toml2json { };
         };
 
         checks = let
