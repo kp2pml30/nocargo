@@ -1,0 +1,4 @@
+[package]
+name = "version-env"
+version = "1.2.3-alpha.1+build.5"
+edition = "2021"

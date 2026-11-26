@@ -106,11 +106,11 @@ setCargoCommonBuildEnv() {
 
     CARGO_PKG_NAME="$(jq --raw-output '.package.name // ""' "$cargoTomlJson")"
     CARGO_PKG_VERSION="$(jq --raw-output '.package.version // ""' "$cargoTomlJson")"
-    if [[ -z "CARGO_PKG_NAME" ]]; then
+    if [[ -z "$CARGO_PKG_NAME" ]]; then
         echo "Package name must be set"
         exit 1
     fi
-    if [[ -z "CARGO_PKG_VERSION" ]]; then
+    if [[ -z "$CARGO_PKG_VERSION" ]]; then
         echo "Package version must be set"
         exit 1
     fi
@@ -127,8 +127,9 @@ setCargoCommonBuildEnv() {
         export CARGO_PKG_VERSION_MAJOR="${BASH_REMATCH[1]}"
         export CARGO_PKG_VERSION_MINOR="${BASH_REMATCH[2]}"
         export CARGO_PKG_VERSION_PATCH="${BASH_REMATCH[3]}"
-        export CARGO_PKG_VERSION_PRE="${BASH_REMATCH[4]}"
+        export CARGO_PKG_VERSION_PRE="${BASH_REMATCH[5]}"
     else
         echo "Invalid version: $version"
+        exit 1
     fi
 }

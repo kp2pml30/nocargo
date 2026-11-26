@@ -12,7 +12,7 @@ let
     assertMsg
     head
     ;
-  inherit (self.lib.${pkgs.system}) mkRustPackageOrWorkspace;
+  inherit (self.lib.${pkgs.stdenv.hostPlatform.system}) mkRustPackageOrWorkspace;
 
   git-semver-1-0-0 = builtins.fetchTarball {
     url = "https://github.com/dtolnay/semver/archive/1.0.0/master.tar.gz";
@@ -99,6 +99,7 @@ in
       lto-thin = ./lto-thin;
       outside-lib-path = ./outside-lib-path/crate;
       tokio-app = ./tokio-app;
+      version-env = ./version-env;
       workspace-inheritance = ./workspace-inheritance/ws;
     }
     // {
