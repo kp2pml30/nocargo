@@ -12,6 +12,7 @@
 /build
 target
 result
+result-*
 zig-out
 zig-build
 

@@ -4,7 +4,6 @@ indent_string = "    "
 reorder_keys = true
 
 [[rule]]
-exclude = []
 include = ["**/Cargo.toml"]
 keys = ["package"]
 
