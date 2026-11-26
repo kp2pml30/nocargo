@@ -143,7 +143,8 @@ in
   _1003-path-srcs =
     let
       ws = mkRustPackageOrWorkspace {
-        src = ./path-srcs/app;
+        # A store path string, as `lib.fileset.toSource` gives.
+        src = builtins.path { path = ./path-srcs/app; };
         pathSrcs."third-party/vendored" = ./path-srcs/vendored;
         buildCrateOverrides.vendored = old: { patches = [ ./path-srcs/greeting.patch ]; };
       };

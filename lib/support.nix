@@ -8,6 +8,7 @@ let
     split
     pathExists
     genericClosure
+    unsafeDiscardStringContext
     storeDir
     intersectAttrs
     length
@@ -285,7 +286,7 @@ rec {
         root:
         let
           path = toString root;
-          rel = removePrefix srcRootPrefix path;
+          rel = unsafeDiscardStringContext (removePrefix srcRootPrefix path);
         in
         if rel != path && pathSrcs ? ${rel} then pathSrcs.${rel} else root;
 
