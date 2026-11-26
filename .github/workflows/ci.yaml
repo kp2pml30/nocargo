@@ -3,13 +3,6 @@ on:
   pull_request:
   push:
 
-  workflow_run:
-    workflows:
-      - update
-    types:
-      - completed
-    branches:
-      - main
 
 permissions:
   contents: read

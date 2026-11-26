@@ -1,23 +1,29 @@
 {
+  description = "Build Rust crates with Nix, 1 derivation per crate";
+
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     registry-crates-io = {
       url = "github:rust-lang/crates.io-index";
       flake = false;
     };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, flake-utils, nixpkgs, registry-crates-io }@inputs:
+  outputs = { self, nixpkgs, registry-crates-io, ... }@inputs:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
 
       inherit (builtins) toJSON typeOf;
-      inherit (nixpkgs.lib) isDerivation isFunction isAttrs mapAttrsToList listToAttrs flatten;
+      inherit (nixpkgs.lib) isDerivation isFunction isAttrs mapAttrs mapAttrsToList listToAttrs flatten;
 
       nocargo-lib = import ./lib { inherit (nixpkgs) lib; };
 
-    in flake-utils.lib.eachSystem supportedSystems (system:
+      perSystem = forEachSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         defaultRegistries = {
@@ -115,7 +121,36 @@
 
           tests' = listToAttrs (flatten (mapAttrsToList flattenTests tests));
 
-        in tests';
+        in tests' // {
+          pre-commit-check = inputs.git-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = import ./support/hooks.nix { inherit pkgs; };
+          };
+        };
       });
+    in {
+      lib = mapAttrs (_: s: s.lib) perSystem;
+      checks = mapAttrs (_: s: s.checks) perSystem;
+
+      formatter = forEachSystem (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          inherit (self.checks.${system}.pre-commit-check.config) package configFile;
+        in
+        pkgs.writeShellScriptBin "pre-commit-run" ''
+          ${pkgs.lib.getExe package} run --all-files --config ${configFile}
+        '');
+
+      devShells = forEachSystem (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          inherit (self.checks.${system}.pre-commit-check) shellHook enabledPackages;
+        in {
+          default = pkgs.mkShell {
+            inherit shellHook;
+            buildInputs = enabledPackages;
+          };
+        });
+    };
 }
 
